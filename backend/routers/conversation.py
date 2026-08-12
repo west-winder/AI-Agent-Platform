@@ -14,6 +14,7 @@ from backend.services.conversation_service import (
 router = APIRouter(prefix="/conversations", tags=["Conversation"])
 
 
+@router.post("", response_model=ConversationResponse)
 # 创建新的对话接口
 def post_conversation(
     conv_in: ConversationCreate,
@@ -24,6 +25,7 @@ def post_conversation(
     return conv
 
 
+@router.get("", response_model=list[ConversationResponse])
 # 查询对话列表接口
 def list_conversations(
     user_id: Optional[int] = Query(None, description="Optional user_id to filter conversations"),
@@ -33,6 +35,7 @@ def list_conversations(
     return convs
 
 
+@router.get("/{id}", response_model=ConversationResponse)
 # 获取单条对话接口
 def read_conversation(id: int = Path(...), db: Session = Depends(get_db)):
     conv = get_conversation(db, id)
@@ -41,6 +44,7 @@ def read_conversation(id: int = Path(...), db: Session = Depends(get_db)):
     return conv
 
 
+@router.delete("/{id}")
 # 删除对话接口
 def remove_conversation(id: int = Path(...), db: Session = Depends(get_db)):
     ok = delete_conversation(db, id)

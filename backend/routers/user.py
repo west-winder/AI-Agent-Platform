@@ -16,6 +16,7 @@ from backend.services.user_service import (
 router = APIRouter(prefix="/users", tags=["User"])
 
 
+@router.post("", response_model=UserResponse)
 # 创建用户接口
 def create_user_api(
    user: UserCreate,
@@ -29,6 +30,7 @@ def create_user_api(
    return new_user
 
 
+@router.get("", response_model=list[UserResponse])
 # 获取所有用户接口
 def get_users_api(
    db: Session = Depends(get_db)
@@ -37,6 +39,7 @@ def get_users_api(
    return users
 
 
+@router.get("/{user_id}", response_model=UserResponse)
 # 根据用户ID获取用户接口
 def get_user_api(
    user_id: int,
@@ -56,6 +59,7 @@ def get_user_api(
    return user
 
 
+@router.put("/{user_id}", response_model=UserResponse)
 # 更新用户信息接口
 def update_user_api(
    user_id: int,
@@ -78,6 +82,7 @@ def update_user_api(
    return db_user
 
 
+@router.delete("/{user_id}")
 # 删除用户接口
 def delete_user_api(
    user_id: int,

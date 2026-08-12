@@ -16,6 +16,7 @@ router = APIRouter(
 )
 
 
+@router.get("", response_model=list[MessageResponse])
 # 查询指定会话下的消息列表
 def get_messages(
     conversation_id: int,

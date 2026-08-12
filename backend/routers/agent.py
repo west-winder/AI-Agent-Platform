@@ -22,6 +22,7 @@ router = APIRouter(
 agent_service = AgentService()
 
 
+@router.post("", response_model=AgentResponse)
 # 创建智能体接口
 def create_agent(
     agent: AgentCreate,
@@ -37,6 +38,7 @@ def create_agent(
     )
 
 
+@router.get("", response_model=list[AgentResponse])
 # 获取当前用户下的智能体列表接口
 def get_agents(
     db:Session = Depends(get_db)
@@ -50,6 +52,7 @@ def get_agents(
     )
 
 
+@router.get("/{agent_id}", response_model=AgentResponse)
 # 获取单个智能体接口
 def get_agent(
     agent_id:int,
@@ -71,6 +74,7 @@ def get_agent(
     return agent
 
 
+@router.put("/{agent_id}", response_model=AgentResponse)
 # 更新智能体信息接口
 def update_agent(
     agent_id:int,
@@ -93,6 +97,7 @@ def update_agent(
     return agent
 
 
+@router.delete("/{agent_id}")
 # 删除智能体接口
 def delete_agent(
     agent_id:int,

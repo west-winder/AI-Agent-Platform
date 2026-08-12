@@ -21,6 +21,7 @@ router = APIRouter(
 model_service = ModelService()
 
 
+@router.post("", response_model=ModelResponse)
 # 创建模型接口
 def create_model(
     model: ModelCreate,
@@ -33,6 +34,7 @@ def create_model(
     )
 
 
+@router.get("", response_model=list[ModelResponse])
 # 获取模型列表接口
 def get_models(
     db: Session = Depends(get_db)
@@ -43,6 +45,7 @@ def get_models(
     )
 
 
+@router.get("/{model_id}", response_model=ModelResponse)
 # 获取单个模型接口
 def get_model(
     model_id:int,
@@ -66,6 +69,7 @@ def get_model(
     return model
 
 
+@router.delete("/{model_id}")
 # 删除模型接口
 def delete_model(
     model_id:int,
