@@ -1,19 +1,87 @@
-from fastapi import APIRouter
-
-from ..schemas.chat import ChatRequest, ChatResponse
-
-from ..services.chat_service import build_chat_response
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 
-router = APIRouter(prefix="/chat", tags=["Chat"])
+from backend.database.database import get_db
+
+from backend.schemas.chat import (
+    ChatRequest,
+    ChatResponse
+)
+
+from backend.services.chat_service import (
+    chat
+)
 
 
-# 接收聊天请求并返回聊天响应
-def chat(req:ChatRequest):
 
-    resp = build_chat_response(req)
+# 创建Router对象
+#
+# prefix:
+# 代表接口统一前缀
+#
+# tags:
+# 方便Swagger文档分类
 
-    return {
-        "answer": resp.answer,
-        "model": resp.model
+router = APIRouter(
+    prefix="/chat",
+    tags=["Chat"]
+)
+
+
+
+@router.post(
+    "",
+    response_model=ChatResponse
+)
+def chat_endpoint(
+    request: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    AI聊天接口
+
+    请求:
+
+    {
+        "conversation_id":1,
+        "message":"你好"
     }
+
+
+    流程:
+
+    Router
+
+    ↓
+
+    ChatService
+
+    ↓
+
+    LLM
+
+    ↓
+
+    返回答案
+
+    """
+
+
+    # 调用ChatService完成核心聊天流程
+    #
+    # Router不关心：
+    # - 怎么找Agent
+    # - 怎么查Message
+    # - 怎么调用LLM
+    #
+    # 这些全部交给Service
+
+    result = chat(
+        db=db,
+        conversation_id=request.conversation_id,
+        user_message=request.message
+    )
+
+
+    return result
