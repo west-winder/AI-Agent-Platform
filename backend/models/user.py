@@ -6,7 +6,7 @@ from backend.database.database import Base
 
 class User(Base):
 
-    __tablename__="users"
+    __tablename__ = "users"
 
 
     id = Column(
@@ -16,12 +16,14 @@ class User(Base):
 
 
     username = Column(
-        String
+        String(50),
+        nullable=False
     )
 
 
     email = Column(
-        String
+        String(100),
+        nullable=True
     )
 
 
@@ -32,7 +34,6 @@ class User(Base):
 
 
     agents = relationship(
-    "Agent",
-    back_populates="user"
-)
-
+        "Agent",
+        back_populates="user"
+    )

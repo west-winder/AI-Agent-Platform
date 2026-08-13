@@ -1,19 +1,39 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime
-
+from typing import Optional, Dict, Any
 
 class ConversationCreate(BaseModel):
-    title: str
+
     agent_id: int
+
 
 
 class ConversationResponse(BaseModel):
+
     id: int
+
     user_id: int
+
     agent_id: int
-    title: str
+
+    title: Optional[str] = None
+
     summary: Optional[str] = None
+
+    status: str
+
+    agent_snapshot: Optional[Dict[str, Any]] = None
+
+    updated_at: datetime
+
+    last_message_time: Optional[datetime] = None
+
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    deleted_at: Optional[datetime] = None
+
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )

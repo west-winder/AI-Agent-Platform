@@ -8,7 +8,8 @@ class ChatRequest(BaseModel):
 
     conversation_id: int
 
-    message: str
+    content: str
+
 
 
 class ChatResponse(BaseModel):
@@ -17,5 +18,7 @@ class ChatResponse(BaseModel):
     """
 
     conversation_id: int
+
+    message_id: int
 
     answer: str

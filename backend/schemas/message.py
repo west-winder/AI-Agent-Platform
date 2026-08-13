@@ -1,32 +1,33 @@
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Optional, Dict, Any
+
+from pydantic import BaseModel, ConfigDict
 
 
-class MessageBase(BaseModel):
+class MessageCreate(BaseModel):
 
-    role: str
-
+    # 用户发送内容
     content: str
 
 
 
-class MessageCreate(MessageBase):
-
-    pass
-
-
-
-class MessageResponse(MessageBase):
+class MessageResponse(BaseModel):
 
     id: int
 
     conversation_id: int
 
-    token_count: int | None = None
+    role: str
+
+    content: str
+
+    token_count: Optional[int] = None
+
+    message_metadata: Optional[Dict[str, Any]] = None
 
     created_at: datetime
 
 
-    class Config:
-
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True
+    )

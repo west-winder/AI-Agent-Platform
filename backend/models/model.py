@@ -50,9 +50,3 @@ class Model(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
-
-
-    agents = relationship(
-    "Agent",
-    back_populates="model"
-)

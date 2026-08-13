@@ -10,8 +10,6 @@ class AgentBase(BaseModel):
 
     system_prompt: str
 
-    model_id: int
-
 
 
 class AgentCreate(AgentBase):
@@ -25,8 +23,6 @@ class AgentUpdate(BaseModel):
 
     system_prompt: Optional[str] = None
 
-    model_id: Optional[int] = None
-
 
 
 class AgentResponse(AgentBase):
@@ -37,4 +33,11 @@ class AgentResponse(AgentBase):
 
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    updated_at: datetime
+
+    deleted_at: Optional[datetime] = None
+
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )

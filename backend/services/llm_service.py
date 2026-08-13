@@ -1,33 +1,27 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
-def call_llm(messages: List[Dict[str, str]]) -> str:
+def chat_completion(
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None
+) -> str:
     """
-    调用大语言模型
+    调用大语言模型生成回复
 
     Args:
         messages:
-            LLM需要的消息列表
+            LLM标准消息格式
 
-            示例:
-            [
-                {
-                    "role": "system",
-                    "content": "你是科研助手"
-                },
-                {
-                    "role": "user",
-                    "content": "什么是RAG"
-                }
-            ]
+        model:
+            使用模型名称
 
     Returns:
-        AI生成的文本
+        AI生成文本
     """
 
 
     # TODO:
-    # 后续这里替换成 DeepSeek/OpenAI API 调用
+    # 后续替换DeepSeek/OpenAI API
 
 
     return "这是模拟AI回复"

@@ -24,13 +24,6 @@ class Agent(Base):
     )
 
 
-    model_id = Column(
-        Integer,
-        ForeignKey("models.id"),
-        nullable=False
-    )
-
-
     name = Column(
         String(100),
         nullable=False
@@ -49,13 +42,26 @@ class Agent(Base):
     )
 
 
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+
+    deleted_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+
     user = relationship(
-      "User",
-      back_populates="agents"
-     )
+        "User",
+        back_populates="agents"
+    )
 
 
-    model = relationship(
-     "Model",
-     back_populates="agents"
-     )
+    conversations = relationship(
+    "Conversation",
+    back_populates="agent"
+    )

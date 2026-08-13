@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database.database import get_db
-from backend.schemas.user import UserCreate, UserUpdate, UserResponse, MessageResponse
+from backend.schemas.user import UserCreate, UserUpdate, UserResponse
 from backend.services.user_service import (
    create_user,
    delete_user,

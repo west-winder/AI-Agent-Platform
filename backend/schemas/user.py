@@ -26,6 +26,3 @@ class UserResponse(BaseModel):
 
 
 
-class MessageResponse(BaseModel):
-
-    message:str
