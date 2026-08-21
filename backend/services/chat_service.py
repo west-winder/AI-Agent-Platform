@@ -21,7 +21,7 @@ from backend.services.llm_service import (
     call_llm
 )
 
-from backend.memory.extractor import (
+from backend.memory.memory_extractor import (
     MemoryExtractor
 )
 
@@ -152,43 +152,35 @@ def chat(
     )
 
     # ==================================================
-    # 8. Memory Extraction
+    # 8. Memory Write Pipeline
     # ==================================================
 
     try:
+        # 使用 MemoryPipeline 负责完整的写入逻辑（Extraction/Validation/Dedup/Similarity/Judge/Persistence）
+        from backend.memory.memory_pipeline import MemoryPipeline
 
-        candidates = memory_extractor.extract(
-            user_message
+        pipeline = MemoryPipeline()
+
+        # 将用户消息交给 Pipeline 处理，其内部会负责读取/写入 SQLite
+        pipeline.process(
+            db=db,
+            user_id=conversation.user_id,
+            user_message=user_message,
         )
-
-        # ==================================================
-        # 9. 保存Memory
-        # ==================================================
-
-        for candidate in candidates:
-
-            memory_data = MemoryCreate(
-                content=candidate.content,
-                memory_type=candidate.memory_type
-            )
-
-            create_memory(
-                db,
-                user_id=conversation.user_id,
-                memory_data=memory_data
-            )
 
     except Exception as e:
 
         # ==================================================
-        # Memory属于辅助能力。
+        # Memory 属于辅助能力。
         #
-        # 如果Memory Extraction失败，
-        # 不应该影响正常Chat。
+        # 如果 Memory Pipeline 失败，
+        # 不应该影响正常 Chat。
+        #
+        # 这里保持和之前一致的宽松策略：记录异常但不抛出。
         # ==================================================
 
         print(
-            f"Memory extraction failed: {e}"
+            f"Memory pipeline failed: {e}"
         )
 
     # ==================================================

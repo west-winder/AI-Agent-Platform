@@ -62,6 +62,10 @@ def normalize_content(content: str) -> str:
     # 去除常见句末标点
     content = content.rstrip("。！？!?")
 
+    # 保持严格的 Exact Match 规范化：只做最保守的格式化处理，
+    # 避免在去重阶段引入语义级别的归一化。
+    # 这意味着不再移除“使用”等词语，也不删除中间空格。
+
     return content
 
 
