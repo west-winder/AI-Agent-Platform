@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
 
-from backend.memory.memory_extractor import MemoryExtractor
-from backend.memory.memory_validator import MemoryValidator
-from backend.memory.memory_deduplicator import check_duplicate
-from backend.memory.memory_similarity import MemorySimilarity
-from backend.memory.memory_relationship_judge import (
+from backend.memory.memory_write.memory_extractor import MemoryExtractor
+from backend.memory.memory_write.memory_validator import MemoryValidator
+from backend.memory.memory_write.memory_deduplicator import check_duplicate
+from backend.memory.memory_write.memory_similarity import MemorySimilarity
+from backend.memory.memory_write.memory_relationship_judge import (
     MemoryRelationshipJudge,
 )
 
@@ -171,14 +171,7 @@ class MemoryPipeline:
         )
 
         if not candidates:
-            print(
-                "[Memory Pipeline] No candidates extracted."
-            )
             return []
-
-        print(
-            f"[Memory Pipeline] Extracted {len(candidates)} candidate(s)."
-        )
 
         # ==================================================
         # Step 2：获取已有 Memory
@@ -189,10 +182,6 @@ class MemoryPipeline:
             user_id,
         )
 
-        print(
-            f"[Memory Pipeline] Existing memories: {len(memories)}"
-        )
-
         # ==================================================
         # Step 3：逐个处理 Candidate
         # ==================================================
@@ -200,12 +189,6 @@ class MemoryPipeline:
         saved_memories = []
 
         for candidate in candidates:
-
-            print("\n========================================")
-            print("[Memory Pipeline] Processing Candidate")
-            print(f"Content: {candidate.content}")
-            print(f"Type: {candidate.memory_type}")
-            print("========================================")
 
             # ==================================================
             # 3.1 Validation
@@ -215,16 +198,7 @@ class MemoryPipeline:
                 candidate
             )
 
-            print(
-                "[Validation]",
-                validation_result.valid,
-                validation_result.reason,
-            )
-
             if not validation_result.valid:
-                print(
-                    "[Decision] Invalid candidate -> SKIP"
-                )
                 continue
 
             # ==================================================
@@ -236,16 +210,7 @@ class MemoryPipeline:
                 memories,
             )
 
-            print(
-                "[Exact Dedup]",
-                duplicate_result.duplicate,
-                duplicate_result.reason,
-            )
-
             if duplicate_result.duplicate:
-                print(
-                    "[Decision] Exact duplicate -> SKIP"
-                )
                 continue
 
             # ==================================================
@@ -263,26 +228,6 @@ class MemoryPipeline:
                 similarity_result.matches
             )
 
-            print(
-                f"[Similarity] "
-                f"Found {len(similar_memories)} match(es)"
-            )
-
-            if similar_memories:
-
-                for memory in similar_memories:
-                    print(
-                        f"  - id={memory.memory_id} | "
-                        f"similarity={memory.similarity:.6f} | "
-                        f"type={memory.memory_type} | "
-                        f"content={memory.content}"
-                    )
-
-            else:
-                print(
-                    "[Similarity] No similar memories."
-                )
-
             # ==================================================
             # 3.4 Relationship Judge
             # ==================================================
@@ -297,20 +242,13 @@ class MemoryPipeline:
             # Candidate 可以直接进入 Final Decision。
             # --------------------------------------------------
 
-            if not similar_memories:
-
-                print(
-                    "[Relationship Judge] SKIP "
-                    "(no similar memories)"
-                )
-
             # --------------------------------------------------
             # 存在相似 Memory：
             #
             # 调用 Relationship Judge。
             # --------------------------------------------------
 
-            else:
+            if similar_memories:
 
                 relationship_result = (
                     self.relationship_judge.judge(
@@ -318,19 +256,6 @@ class MemoryPipeline:
                         similar_memories,
                     )
                 )
-
-                print(
-                    "[Relationship Judge] Result:"
-                )
-
-                for relationship in (
-                    relationship_result.relationships
-                ):
-                    print(
-                        f"  - memory_id={relationship.memory_id} | "
-                        f"relationship={relationship.relationship} | "
-                        f"reason={relationship.reason}"
-                    )
 
             # ==================================================
             # 3.5 Final Decision
@@ -348,18 +273,11 @@ class MemoryPipeline:
             # 此时默认 Candidate 是新的 Memory。
             # --------------------------------------------------
 
-            if relationship_result is None:
-
-                print(
-                    "[Final Decision] "
-                    "No relationship result -> SAVE"
-                )
-
             # --------------------------------------------------
             # 存在 Relationship Result：
             # --------------------------------------------------
 
-            else:
+            if relationship_result is not None:
 
                 for relationship in (
                     relationship_result.relationships
@@ -375,11 +293,6 @@ class MemoryPipeline:
                     ):
 
                         should_save = False
-
-                        print(
-                            "[Final Decision] "
-                            "Duplicate -> SKIP"
-                        )
 
                         break
 
@@ -401,12 +314,6 @@ class MemoryPipeline:
                         == "conflict"
                     ):
 
-                        print(
-                            "[Final Decision] "
-                            "Conflict -> SAVE "
-                            "(current version does not resolve conflict)"
-                        )
-
                         continue
 
                     # ------------------------------------------
@@ -418,11 +325,6 @@ class MemoryPipeline:
                         == "related"
                     ):
 
-                        print(
-                            "[Final Decision] "
-                            "Related -> SAVE"
-                        )
-
                         continue
 
                     # ------------------------------------------
@@ -433,11 +335,6 @@ class MemoryPipeline:
                         relationship.relationship
                         == "new"
                     ):
-
-                        print(
-                            "[Final Decision] "
-                            "New -> SAVE"
-                        )
 
                         continue
 
@@ -452,10 +349,6 @@ class MemoryPipeline:
             # 3.6 Persistence
             # ==================================================
 
-            print(
-                "[Persistence] Saving memory..."
-            )
-
             memory_data = MemoryCreate(
                 content=candidate.content,
                 memory_type=candidate.memory_type,
@@ -469,11 +362,6 @@ class MemoryPipeline:
 
             saved_memories.append(
                 memory
-            )
-
-            print(
-                f"[Persistence] Saved successfully: "
-                f"id={memory.id}"
             )
 
             # ==================================================
@@ -491,10 +379,5 @@ class MemoryPipeline:
         # ==================================================
         # Pipeline 完成
         # ==================================================
-
-        print(
-            f"\n[Memory Pipeline] Completed. "
-            f"Saved {len(saved_memories)} memory(s)."
-        )
 
         return saved_memories

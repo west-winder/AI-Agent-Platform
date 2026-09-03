@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session
 
 from backend.schemas.message import MessageCreate
 from backend.schemas.chat import ChatResponse
-from backend.schemas.memory import MemoryCreate
 
 from backend.services.conversation_service import (
     get_conversation
@@ -13,28 +12,24 @@ from backend.services.message_service import (
     get_messages_by_conversation
 )
 
-from backend.services.memory_service import (
-    create_memory
-)
-
 from backend.services.llm_service import (
     call_llm
 )
 
-from backend.memory.memory_extractor import (
-    MemoryExtractor
+from backend.memory.memory_read.memory_reader import (
+    MemoryReader
 )
 
 
 # ==================================================
-# Memory Extractor
+# Memory Reader
 # ==================================================
 
-memory_extractor = MemoryExtractor()
+memory_reader = MemoryReader()
 
 
 # ==================================================
-# Chat核心业务
+# Chat 核心业务
 # ==================================================
 
 def chat(
@@ -43,22 +38,22 @@ def chat(
     user_message: str
 ):
     """
-    Chat核心业务流程
+    Chat 核心业务流程。
 
-    1. 查询Conversation
-    2. 获取agent_snapshot
-    3. 保存用户消息
-    4. 获取历史消息
-    5. 转换LLM格式
-    6. 调用Chat LLM
-    7. 保存AI回复
-    8. 提取Memory
-    9. 保存Memory
+    1. 查询 Conversation
+    2. 获取 Agent Snapshot
+    3. 保存 User Message
+    4. Memory Read
+    5. 获取历史消息
+    6. 构造 LLM Messages
+    7. 调用 Chat LLM
+    8. 保存 Assistant Message
+    9. Memory Write
     10. 返回结果
     """
 
     # ==================================================
-    # 1. 查询Conversation
+    # 1. 查询 Conversation
     # ==================================================
 
     conversation = get_conversation(
@@ -72,7 +67,7 @@ def chat(
         )
 
     # ==================================================
-    # 2. 获取Agent Snapshot
+    # 2. 获取 Agent Snapshot
     # ==================================================
 
     agent_snapshot = conversation.agent_snapshot
@@ -83,7 +78,7 @@ def chat(
         )
 
     # ==================================================
-    # 3. 保存用户消息
+    # 3. 保存 User Message
     # ==================================================
 
     user_message_data = MessageCreate(
@@ -98,26 +93,105 @@ def chat(
     )
 
     # ==================================================
-    # 4. 获取历史消息
+    # 4. Memory Read Pipeline
     # ==================================================
 
-    history_messages = get_messages_by_conversation(
-        db,
-        conversation_id
+    memory_context = ""
+
+    try:
+
+        memory_read_result = (
+            memory_reader.read(
+                db=db,
+                user_id=conversation.user_id,
+                query=user_message,
+                top_n=20,
+                top_k=5
+            )
+        )
+
+        memory_context = (
+            memory_read_result.memory_context
+        )
+
+    except Exception as e:
+
+        # ==================================================
+        # Memory Read 属于增强能力。
+        #
+        # 如果 Memory Read 失败，
+        # 不应该阻断正常 Chat。
+        #
+        # 此时保持 memory_context = ""
+        # 降级为普通 Chat。
+        # ==================================================
+
+        print(
+            f"Memory read failed: {e}"
+        )
+
+    # ==================================================
+    # 5. 获取历史消息
+    # ==================================================
+
+    history_messages = (
+        get_messages_by_conversation(
+            db,
+            conversation_id
+        )
     )
 
     # ==================================================
-    # 5. 转换成LLM消息格式
+    # 6. 构造 LLM Messages
     # ==================================================
 
     llm_messages = []
 
+    # --------------------------------------------------
+    # 6.1 Agent System Prompt
+    # --------------------------------------------------
+
+    system_content = (
+        agent_snapshot["system_prompt"]
+    )
+
+    # --------------------------------------------------
+    # 6.2 Memory Context
+    #
+    # MemoryReader 负责：
+    #
+    # Repository
+    # → Retrieval
+    # → Reranker
+    # → Judge
+    # → Injector
+    #
+    # ChatService 负责决定：
+    #
+    # Memory Context 如何进入最终 LLM Context。
+    # --------------------------------------------------
+
+    if memory_context:
+
+        system_content = (
+            f"{system_content}\n\n"
+            f"{memory_context}"
+        )
+
+    # --------------------------------------------------
+    # 6.3 System Message
+    # --------------------------------------------------
+
     llm_messages.append(
         {
             "role": "system",
-            "content": agent_snapshot["system_prompt"]
+            "content": system_content
         }
     )
+
+    # --------------------------------------------------
+    # 6.4 Conversation History
+    # --------------------------------------------------
 
     for message in history_messages:
 
@@ -129,7 +203,7 @@ def chat(
         )
 
     # ==================================================
-    # 6. 调用Chat LLM
+    # 7. 调用 Chat LLM
     # ==================================================
 
     answer = call_llm(
@@ -137,7 +211,7 @@ def chat(
     )
 
     # ==================================================
-    # 7. 保存Assistant Message
+    # 8. 保存 Assistant Message
     # ==================================================
 
     assistant_message_data = MessageCreate(
@@ -152,16 +226,17 @@ def chat(
     )
 
     # ==================================================
-    # 8. Memory Write Pipeline
+    # 9. Memory Write Pipeline
     # ==================================================
 
     try:
-        # 使用 MemoryPipeline 负责完整的写入逻辑（Extraction/Validation/Dedup/Similarity/Judge/Persistence）
-        from backend.memory.memory_pipeline import MemoryPipeline
+
+        from backend.memory.memory_write.memory_pipeline import (
+            MemoryPipeline
+        )
 
         pipeline = MemoryPipeline()
 
-        # 将用户消息交给 Pipeline 处理，其内部会负责读取/写入 SQLite
         pipeline.process(
             db=db,
             user_id=conversation.user_id,
@@ -171,20 +246,18 @@ def chat(
     except Exception as e:
 
         # ==================================================
-        # Memory 属于辅助能力。
+        # Memory Write 同样属于增强能力。
         #
-        # 如果 Memory Pipeline 失败，
-        # 不应该影响正常 Chat。
-        #
-        # 这里保持和之前一致的宽松策略：记录异常但不抛出。
+        # Memory Write 失败，
+        # 不应该影响已经完成的正常 Chat。
         # ==================================================
 
         print(
-            f"Memory pipeline failed: {e}"
+            f"Memory write failed: {e}"
         )
 
     # ==================================================
-    # 10. 返回Chat结果
+    # 10. 返回 Chat 结果
     # ==================================================
 
     return ChatResponse(

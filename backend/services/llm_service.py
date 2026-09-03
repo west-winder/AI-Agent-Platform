@@ -40,7 +40,7 @@ def chat_completion(
     if model is None:
         model = os.getenv(
             "DEFAULT_MODEL",
-            "deepseek-chat"
+            "deepseek-v4-flash"
         )
 
 

@@ -1,3 +1,6 @@
+import os
+
+from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
 
@@ -7,7 +10,7 @@ class Embedder:
 
     当前使用本地 SentenceTransformer 模型：
 
-    all-MiniLM-L6-v2
+    Qwen3-Embedding-0.6B
 
     职责：
 
@@ -29,19 +32,30 @@ class Embedder:
     6. 数据库操作
     """
 
-    MODEL_NAME = "all-MiniLM-L6-v2"
-
     def __init__(self):
         """
         初始化 Embedding Model。
         """
 
+        load_dotenv()
+
+        model_path = os.getenv(
+            "EMBEDDING_MODEL_PATH"
+        )
+
+        if not model_path:
+            model_path = "all-MiniLM-L6-v2"
+            print(
+                "[Embedder] 警告：未设置 EMBEDDING_MODEL_PATH，"
+                "回退到默认模型 all-MiniLM-L6-v2"
+            )
+
         print(
-            f"[Embedder] 正在加载模型：{self.MODEL_NAME}"
+            f"[Embedder] 正在加载模型：{model_path}"
         )
 
         self.model = SentenceTransformer(
-            self.MODEL_NAME
+            model_path
         )
 
         print(
