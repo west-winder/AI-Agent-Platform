@@ -6,25 +6,35 @@ from backend.embedding.embedder import Embedder
 
 
 @dataclass
-class RetrievedMemory:
+class DenseRetrievedMemory:
     """
-    Memory Read 阶段的检索候选。
+    Memory Read 阶段的 Dense Retrieval 候选。
 
     表示：
+    原始 Memory Index
+    +
     一条 Memory
     +
     它与 Query 的向量相似度
+
+    index:
+        当前 Memory 在传入 search() 的原始 memories 列表中的位置。
+
+        注意：
+        index != rank
+        index != memory_id
     """
 
+    index: int
     memory: object
     similarity: float
 
 
-class MemoryRetriever:
+class DenseMemoryRetriever:
     """
-    Memory Read V1 的 Candidate Retrieval。
+    Memory Read 的 Dense Candidate Retrieval。
 
-    职责：
+    当前实现：
 
     Query
         ↓
@@ -40,16 +50,21 @@ class MemoryRetriever:
         ↓
     Top-N Candidates
 
-    本模块只负责 Candidate Generation。
+    当前仍然是：
+
+    Brute-force Dense Retrieval
+
+    本模块只负责 Dense Candidate Generation。
 
     不负责：
 
     1. 数据库查询
-    2. Reranking
-    3. LLM Judge
-    4. Memory Injection
-    5. Hybrid Search
-    6. Metadata Filtering
+    2. BM25 Retrieval
+    3. RRF
+    4. Reranking
+    5. LLM Judge
+    6. Memory Injection
+    7. Metadata Filtering
     """
 
     def __init__(
@@ -57,14 +72,14 @@ class MemoryRetriever:
         embedder=None
     ):
         """
-        初始化 Retriever。
+        初始化 Dense Retriever。
 
         参数：
             embedder:
                 通用 Embedder。
                 支持依赖注入，方便测试。
 
-        如果没有传入，则自动创建 Embedder。
+        如果没有传入，则在真正需要时自动创建 Embedder。
         """
 
         self._embedder = embedder
@@ -94,8 +109,11 @@ class MemoryRetriever:
         计算两个向量的 Cosine Similarity。
 
         参数：
-            a: 向量 A
-            b: 向量 B
+            a:
+                向量 A。
+
+            b:
+                向量 B。
 
         返回：
             float
@@ -135,9 +153,9 @@ class MemoryRetriever:
         query: str,
         memories: list,
         top_n: int = 5
-    ) -> list[RetrievedMemory]:
+    ) -> list[DenseRetrievedMemory]:
         """
-        根据 Query 从 Memory 集合中召回 Top-N 候选。
+        根据 Query 从 Memory 集合中召回 Top-N Dense 候选。
 
         参数：
             query:
@@ -146,11 +164,15 @@ class MemoryRetriever:
             memories:
                 Memory 对象列表。
 
+                memories 中的位置 index
+                会被保存在 DenseRetrievedMemory.index 中，
+                用于后续 Hybrid Retrieval / RRF。
+
             top_n:
                 最多返回多少条 Candidate。
 
         返回：
-            list[RetrievedMemory]
+            list[DenseRetrievedMemory]
 
         流程：
 
@@ -163,6 +185,8 @@ class MemoryRetriever:
             Memory Embeddings
               ↓
             Cosine Similarity
+              ↓
+            保留原始 Memory Index
               ↓
             Sort
               ↓
@@ -240,9 +264,11 @@ class MemoryRetriever:
 
         scored_memories = []
 
-        for memory, vector in zip(
-            memories,
-            memory_vectors
+        for index, (memory, vector) in enumerate(
+            zip(
+                memories,
+                memory_vectors
+            )
         ):
 
             similarity = self._cosine(
@@ -251,7 +277,8 @@ class MemoryRetriever:
             )
 
             scored_memories.append(
-                RetrievedMemory(
+                DenseRetrievedMemory(
+                    index=index,
                     memory=memory,
                     similarity=similarity
                 )

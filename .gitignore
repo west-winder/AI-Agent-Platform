@@ -11,8 +11,8 @@ __pycache__/
 # Virtual Environment
 # =====================
 
-venv/
 .venv/
+venv/
 env/
 
 
@@ -54,3 +54,10 @@ env/
 
 .DS_Store
 Thumbs.db
+
+
+# =====================
+# Agent / Tool Workspace
+# =====================
+
+.workbuddy/

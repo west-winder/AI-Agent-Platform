@@ -9,9 +9,19 @@ from backend.memory.memory_read.memory_repository import (
     get_memories_for_read
 )
 
-from backend.memory.memory_read.retriever import (
-    MemoryRetriever,
-    RetrievedMemory
+from backend.memory.memory_read.dense_retriever import (
+    DenseMemoryRetriever,
+    DenseRetrievedMemory
+)
+
+from backend.retrieval.bm25 import (
+    BM25Retriever,
+    BM25Result
+)
+
+from backend.retrieval.rrf import (
+    reciprocal_rank_fusion,
+    RRFResult
 )
 
 from backend.memory.memory_read.memory_relevance_judge import (
@@ -28,9 +38,48 @@ from backend.memory.memory_read.memory_injector import (
     MemoryInjector
 )
 
+
 # ==================================================
 # Runtime Data Structures
 # ==================================================
+
+
+@dataclass
+class HybridMemoryCandidate:
+    """
+    一条经过 Hybrid Retrieval 后的 Memory Candidate。
+
+    index:
+        Memory 在原始 memories 列表中的位置。
+
+    memory:
+        原始 Memory ORM 对象。
+
+    dense_score:
+        Dense Retrieval similarity。
+
+        None 表示：
+        该 Memory 没有进入 Dense Top-N。
+
+    bm25_score:
+        BM25 Retrieval score。
+
+        None 表示：
+        该 Memory 没有进入 BM25 Top-N。
+
+    rrf_score:
+        RRF 融合后的最终 Retrieval score。
+    """
+
+    index: int
+
+    memory: Memory
+
+    dense_score: float | None
+
+    bm25_score: float | None
+
+    rrf_score: float
 
 
 @dataclass
@@ -39,44 +88,28 @@ class MemoryReadItem:
     单条 Memory 在一次 Memory Read Pipeline
     中的完整运行时状态。
 
-    属性：
-        memory:
-            原始 Memory ORM 对象。
+    保存：
 
-        retrieval_score:
-            Retriever 阶段计算得到的
-            Query-Memory 向量相似度。
+    Dense Retrieval
+    +
+    BM25 Retrieval
+    +
+    RRF
+    +
+    Reranker
+    +
+    Judge
 
-        rerank_score:
-            Reranker 阶段计算得到的
-            Query-Memory 相关性分数。
-
-        judge_selected:
-            LLM Judge 的最终判断。
-
-            True:
-                Judge 判断该 Memory
-                应该用于当前 Query。
-
-            False:
-                Judge 已经判断，
-                但认为该 Memory
-                不应该用于当前 Query。
-
-            None:
-                该 Memory 没有进入 Top-K，
-                因此没有进入 Judge。
-
-        judge_reason:
-            Judge 的判断原因。
-
-            如果没有进入 Judge，
-            则保持 None。
+    的完整 Runtime Trace。
     """
 
     memory: Memory
 
-    retrieval_score: float
+    dense_score: float | None
+
+    bm25_score: float | None
+
+    rrf_score: float
 
     rerank_score: float
 
@@ -90,13 +123,11 @@ class MemoryReadResult:
     """
     一次完整 Memory Read 的运行结果。
 
-    当前 V1 只保存：
-
-    Query
-    +
-    本次进入 Candidate Pipeline 的完整 Trace。
-
     items 按照 Reranker 最终排序保存。
+
+    memory_context:
+        Judge 最终选中的 Memory，
+        经过 MemoryInjector 后生成的上下文。
     """
 
     query: str
@@ -113,44 +144,45 @@ class MemoryReadResult:
 
 class MemoryReader:
     """
-    Memory Read V1 Pipeline Orchestrator。
+    Memory Read V2 Pipeline Orchestrator。
 
     负责组织：
 
     Repository
         ↓
-    Retriever
+    Memory[]
         ↓
-    Top-N
-        ↓
-    Reranker
-        ↓
-    Top-K
-        ↓
-    LLM Judge
-        ↓
-    MemoryInjector
-        ↓
-    MemoryReadResult
+    ┌─────────────────┐
+    ↓                 ↓
+    Dense           BM25
+    Retrieval       Retrieval
+    ↓                 ↓
+    Dense Ranking   BM25 Ranking
+    └────────┬────────┘
+             ↓
+            RRF
+             ↓
+    Hybrid Candidate Pool
+             ↓
+         Reranker
+             ↓
+          Top-K
+             ↓
+        LLM Judge
+             ↓
+      MemoryInjector
+             ↓
+      MemoryReadResult
 
     本模块本身不实现底层算法。
-
-    不负责：
-
-    1. SQL 查询细节
-    2. Embedding
-    3. Cosine Similarity
-    4. Cross Encoder 推理
-    5. Judge Prompt
-    6. LLM API 调用细节
-    7. Memory Context 格式化细节
-    8. Chat Integration
     """
 
     def __init__(
         self,
         repository_callable: Callable | None = None,
-        retriever=None,
+        dense_retriever=None,
+        bm25_retriever=None,
+        rrf_callable: Callable | None = None,
         reranker=None,
         judge=None,
         injector=None
@@ -158,32 +190,8 @@ class MemoryReader:
         """
         初始化 MemoryReader。
 
-        所有组件都支持依赖注入，
-        方便单元测试时使用 Fake Component。
-
-        repository_callable:
-            默认使用：
-            get_memories_for_read
-
-        retriever:
-            默认使用：
-            MemoryRetriever
-
-        reranker:
-            默认使用：
-            CrossEncoderReranker
-
-            Reranker 模型较大，
-            当前采用 Lazy Initialization，
-            第一次真正执行 read() 时再加载。
-
-        judge:
-            默认使用：
-            MemoryRelevanceJudge
-
-        injector:
-            默认使用：
-            MemoryInjector
+        所有核心组件均支持依赖注入，
+        方便 Controlled Test 使用 Fake Component。
         """
 
         if repository_callable is None:
@@ -191,26 +199,58 @@ class MemoryReader:
                 get_memories_for_read
             )
 
-        if retriever is None:
-            retriever = MemoryRetriever()
+        if dense_retriever is None:
+            dense_retriever = (
+                DenseMemoryRetriever()
+            )
+
+        if bm25_retriever is None:
+            bm25_retriever = (
+                BM25Retriever()
+            )
+
+        if rrf_callable is None:
+            rrf_callable = (
+                reciprocal_rank_fusion
+            )
 
         if judge is None:
-            judge = MemoryRelevanceJudge()
+            judge = (
+                MemoryRelevanceJudge()
+            )
 
         if injector is None:
-            injector = MemoryInjector()
+            injector = (
+                MemoryInjector()
+            )
 
         self._repository_callable = (
             repository_callable
         )
 
-        self._retriever = retriever
+        self._dense_retriever = (
+            dense_retriever
+        )
 
-        self._reranker = reranker
+        self._bm25_retriever = (
+            bm25_retriever
+        )
 
-        self._judge = judge
+        self._rrf_callable = (
+            rrf_callable
+        )
 
-        self._injector = injector
+        self._reranker = (
+            reranker
+        )
+
+        self._judge = (
+            judge
+        )
+
+        self._injector = (
+            injector
+        )
 
     # ==================================================
     # Component Initialization
@@ -221,7 +261,7 @@ class MemoryReader:
         确保 Reranker 已初始化。
 
         Cross Encoder 模型加载成本较高，
-        所以当前采用 Lazy Initialization。
+        所以继续采用 Lazy Initialization。
         """
 
         if self._reranker is None:
@@ -310,47 +350,186 @@ class MemoryReader:
             )
 
     # ==================================================
+    # Hybrid Candidate Mapping
+    # ==================================================
+
+    def _build_hybrid_candidates(
+        self,
+        memories: list[Memory],
+        dense_results: list[DenseRetrievedMemory],
+        bm25_results: list[BM25Result],
+        rrf_results: list[RRFResult]
+    ) -> list[HybridMemoryCandidate]:
+        """
+        将 Dense / BM25 / RRF 的结果
+        汇总成统一 HybridMemoryCandidate。
+
+        index 坐标系：
+
+        DenseRetrievedMemory.index
+        BM25Result.index
+        RRFResult.index
+
+        都必须指向：
+
+            原始 memories[]
+
+        即：
+
+            memories[index]
+        """
+
+        # --------------------------------------------------
+        # Dense：
+        #
+        # 原始 Memory Index
+        #       ↓
+        # Dense Similarity
+        # --------------------------------------------------
+
+        dense_scores = {
+            item.index: item.similarity
+            for item in dense_results
+        }
+
+        # --------------------------------------------------
+        # BM25：
+        #
+        # 原始 Memory Index
+        #       ↓
+        # BM25 Score
+        # --------------------------------------------------
+
+        bm25_scores = {
+            item.index: item.score
+            for item in bm25_results
+        }
+
+        hybrid_candidates = []
+
+        seen_indexes = set()
+
+        memory_count = len(
+            memories
+        )
+
+        # --------------------------------------------------
+        # RRF 已经给出了最终 Hybrid Ranking。
+        #
+        # 所以这里按照 rrf_results 的顺序
+        # 构建 Hybrid Candidate。
+        # --------------------------------------------------
+
+        for rrf_result in rrf_results:
+
+            index = rrf_result.index
+
+            # ------------------------------------------
+            # index 类型
+            # ------------------------------------------
+
+            if type(index) is not int:
+                raise TypeError(
+                    "RRFResult.index "
+                    "必须是 int"
+                )
+
+            # ------------------------------------------
+            # index 范围
+            # ------------------------------------------
+
+            if not (
+                0 <= index < memory_count
+            ):
+                raise ValueError(
+                    "RRFResult.index "
+                    f"超出 memories 范围：{index}"
+                )
+
+            # ------------------------------------------
+            # index 重复
+            # ------------------------------------------
+
+            if index in seen_indexes:
+                raise ValueError(
+                    "RRFResult.index "
+                    f"重复：{index}"
+                )
+
+            seen_indexes.add(
+                index
+            )
+
+            # ------------------------------------------
+            # 根据原始 index 找回 Memory
+            # ------------------------------------------
+
+            memory = memories[index]
+
+            # ------------------------------------------
+            # 构造 Hybrid Candidate
+            # ------------------------------------------
+
+            candidate = (
+                HybridMemoryCandidate(
+                    index=index,
+                    memory=memory,
+                    dense_score=(
+                        dense_scores.get(index)
+                    ),
+                    bm25_score=(
+                        bm25_scores.get(index)
+                    ),
+                    rrf_score=(
+                        rrf_result.score
+                    )
+                )
+            )
+
+            hybrid_candidates.append(
+                candidate
+            )
+
+        return hybrid_candidates
+
+    # ==================================================
     # Rerank Mapping
     # ==================================================
 
     def _build_memory_read_items(
         self,
-        retrieved_memories: list[RetrievedMemory],
+        hybrid_candidates: list[
+            HybridMemoryCandidate
+        ],
         rerank_results: list[RerankResult]
     ) -> list[MemoryReadItem]:
         """
         根据 Reranker 的 index，
         将通用 RerankResult
-        映射回 Memory 业务对象。
+        映射回 HybridMemoryCandidate。
 
-        输入：
+        注意：
 
-        RetrievedMemory[]
-            +
-        RerankResult[]
+        RerankResult.index
 
-        输出：
+        指向的是：
 
-        MemoryReadItem[]
+            hybrid_candidates[]
 
-        返回顺序与 Reranker 排序顺序一致。
+        而不是：
+
+            原始 memories[]
+
+        这是一个新的局部 index 坐标系。
         """
-
-        # 当前 Reranker 的契约是：
-        #
-        # 输入多少条 texts，
-        # 就应该返回多少条 RerankResult。
-        #
-        # 如果数量不一致，
-        # 说明组件之间的契约被破坏。
 
         if (
             len(rerank_results)
-            != len(retrieved_memories)
+            != len(hybrid_candidates)
         ):
             raise ValueError(
                 "Reranker 返回结果数量"
-                "与 Retriever Candidate 数量不一致"
+                "与 Hybrid Candidate 数量不一致"
             )
 
         items = []
@@ -358,7 +537,7 @@ class MemoryReader:
         seen_indexes = set()
 
         candidate_count = len(
-            retrieved_memories
+            hybrid_candidates
         )
 
         for rerank_result in rerank_results:
@@ -402,23 +581,30 @@ class MemoryReader:
             )
 
             # ------------------------------------------
-            # 根据 index 找回 Retriever Candidate
+            # 根据 Reranker 的局部 index
+            # 找回 Hybrid Candidate
             # ------------------------------------------
 
-            retrieved_memory = (
-                retrieved_memories[index]
+            hybrid_candidate = (
+                hybrid_candidates[index]
             )
 
             # ------------------------------------------
-            # 构造统一 Runtime Item
+            # 构造 Runtime Trace
             # ------------------------------------------
 
             item = MemoryReadItem(
                 memory=(
-                    retrieved_memory.memory
+                    hybrid_candidate.memory
                 ),
-                retrieval_score=(
-                    retrieved_memory.similarity
+                dense_score=(
+                    hybrid_candidate.dense_score
+                ),
+                bm25_score=(
+                    hybrid_candidate.bm25_score
+                ),
+                rrf_score=(
+                    hybrid_candidate.rrf_score
                 ),
                 rerank_score=(
                     rerank_result.score
@@ -430,7 +616,7 @@ class MemoryReader:
             )
 
         # ----------------------------------------------
-        # 确保所有 Candidate 均被覆盖
+        # 确保 Reranker 完整覆盖输入 Candidate
         # ----------------------------------------------
 
         expected_indexes = set(
@@ -440,7 +626,7 @@ class MemoryReader:
         if seen_indexes != expected_indexes:
             raise ValueError(
                 "Reranker 没有完整覆盖"
-                "所有 Retriever Candidate"
+                "所有 Hybrid Candidate"
             )
 
         return items
@@ -459,20 +645,9 @@ class MemoryReader:
         将 Judge 判断结果映射回
         Top-K MemoryReadItem。
 
-        Judge 的 index 属于：
+        JudgeDecision.index 指向：
 
-        judge_items
-
-        这个输入列表自己的坐标系。
-
-        注意：
-
-        judge_items 中保存的是
-        MemoryReadItem 对象引用。
-
-        因此修改这里的对象，
-        MemoryReadResult.items 中对应对象
-        也会同步更新。
+            judge_items[]
         """
 
         if len(decisions) != len(
@@ -574,7 +749,7 @@ class MemoryReader:
         top_k: int = 5
     ) -> MemoryReadResult:
         """
-        执行一次完整的 Memory Read V1 Pipeline。
+        执行一次完整的 Memory Read V2 Pipeline。
 
         流程：
 
@@ -584,46 +759,32 @@ class MemoryReader:
             ↓
         Memory[]
             ↓
-        Retriever
-            ↓
-        Top-N RetrievedMemory[]
-            ↓
-        提取 Memory.content
-            ↓
-        Reranker
-            ↓
-        RerankResult[]
-            ↓
-        index 映射回 RetrievedMemory
-            ↓
-        MemoryReadItem[]
-            ↓
-        Top-K
-            ↓
-        Memory Relevance Judge
-            ↓
-        JudgeDecision[]
-            ↓
-        写入 Judge Runtime State
-            ↓
-        MemoryReadResult
-
-        注意：
-
-        返回的 items 保留完整 Top-N Trace。
-
-        没有进入 Top-K 的 Candidate：
-
-            judge_selected = None
-            judge_reason = None
-
-        进入 Top-K 并被 Judge 拒绝：
-
-            judge_selected = False
-
-        进入 Top-K 并被 Judge 采用：
-
-            judge_selected = True
+        ┌──────────────────────┐
+        ↓                      ↓
+        Dense Retrieval     BM25 Retrieval
+        ↓                      ↓
+        Dense Top-N         BM25 Top-N
+        ↓                      ↓
+        Dense Ranking       BM25 Ranking
+        └──────────┬───────────┘
+                   ↓
+                  RRF
+                   ↓
+        HybridMemoryCandidate[]
+                   ↓
+                 Text[]
+                   ↓
+               Reranker
+                   ↓
+             MemoryReadItem[]
+                   ↓
+                 Top-K
+                   ↓
+                Judge
+                   ↓
+               Injector
+                   ↓
+          MemoryReadResult
         """
 
         # --------------------------------------------------
@@ -639,10 +800,6 @@ class MemoryReader:
 
         # --------------------------------------------------
         # 2. Repository
-        #
-        # SQLite
-        #   ↓
-        # User Memories
         # --------------------------------------------------
 
         memories = self._repository_callable(
@@ -666,52 +823,149 @@ class MemoryReader:
                 items=[]
             )
 
+
+        effective_top_n = min(
+            top_n,
+            len(memories)
+        )
+
         # --------------------------------------------------
-        # 4. Candidate Retrieval
+        # 4. Dense Retrieval
         #
         # Memory[]
-        #   ↓
-        # Vector Retrieval
-        #   ↓
-        # Top-N
+        #    ↓
+        # Dense Top-N
         # --------------------------------------------------
 
-        retrieved_memories = (
-            self._retriever.search(
+        dense_results = (
+            self._dense_retriever.search(
                 query=query,
                 memories=memories,
-                top_n=top_n
+                top_n=effective_top_n
             )
         )
 
-        # 理论上：
+        # --------------------------------------------------
+        # 5. Memory ORM
+        #      ↓
+        # Generic Text[]
         #
-        # memories 非空时 Retriever 应该返回 Candidate。
-        #
-        # 但这里仍然允许 Retriever 合法返回 []，
-        # 方便未来 Retrieval Strategy 演进。
+        # BM25Retriever 不依赖 Memory。
+        # --------------------------------------------------
 
-        if not retrieved_memories:
+        memory_texts = [
+            memory.content
+            for memory in memories
+        ]
+
+        # --------------------------------------------------
+        # 6. BM25 Index
+        #
+        # 当前 Memory 数据规模很小，
+        # 每次 Read 临时建立 BM25 Index。
+        # --------------------------------------------------
+
+        self._bm25_retriever.index(
+            memory_texts
+        )
+
+        # --------------------------------------------------
+        # 7. BM25 Retrieval
+        # --------------------------------------------------
+
+        bm25_results = (
+            self._bm25_retriever.search(
+                query=query,
+                top_n=effective_top_n
+            )
+        )
+
+        # --------------------------------------------------
+        # 8. Dense / BM25
+        #        ↓
+        # 原始 memories[] index ranking
+        # --------------------------------------------------
+
+        dense_ranking = [
+            item.index
+            for item in dense_results
+        ]
+
+        bm25_ranking = [
+            item.index
+            for item in bm25_results
+            if item.score > 0
+        ]
+
+        # --------------------------------------------------
+        # 9. RRF
+        #
+        # RRF 不关心：
+        #
+        # Dense similarity
+        # BM25 score
+        #
+        # 只关心两个 Retriever 的 ranking。
+        # --------------------------------------------------
+
+        rrf_results = (
+            self._rrf_callable(
+                rankings=[
+                    dense_ranking,
+                    bm25_ranking
+                ],
+                top_n=effective_top_n
+            )
+        )
+
+        if not rrf_results:
             return MemoryReadResult(
                 query=query,
                 items=[]
             )
 
         # --------------------------------------------------
-        # 5. Memory Business Object
-        #        ↓
-        #    Generic Text[]
+        # 10. 构建 Hybrid Candidate
         #
-        # 这是业务层 → 通用基础设施的边界。
+        # Dense Score
+        # BM25 Score
+        # RRF Score
+        # Memory ORM
+        #
+        # 汇总到统一 Runtime Candidate。
+        # --------------------------------------------------
+
+        hybrid_candidates = (
+            self._build_hybrid_candidates(
+                memories=memories,
+                dense_results=dense_results,
+                bm25_results=bm25_results,
+                rrf_results=rrf_results
+            )
+        )
+
+        if not hybrid_candidates:
+            return MemoryReadResult(
+                query=query,
+                items=[]
+            )
+
+        # --------------------------------------------------
+        # 11. Hybrid Business Object
+        #          ↓
+        #      Generic Text[]
+        #
+        # Reranker 只认识文本，
+        # 不认识 Memory / BM25 / RRF。
         # --------------------------------------------------
 
         texts = [
             item.memory.content
-            for item in retrieved_memories
+            for item in hybrid_candidates
         ]
 
         # --------------------------------------------------
-        # 6. Reranker
+        # 12. Reranker
         # --------------------------------------------------
 
         self._ensure_reranker()
@@ -724,20 +978,19 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 7. RerankResult.index
-        #        ↓
-        # RetrievedMemory
-        #        ↓
-        # MemoryReadItem
+        # 13. RerankResult.index
+        #          ↓
+        # HybridMemoryCandidate[]
+        #          ↓
+        # MemoryReadItem[]
         #
-        # 同时按照 Reranker 排序顺序
-        # 构建完整 Top-N Trace。
+        # items 按 Reranker 排名保存。
         # --------------------------------------------------
 
         items = (
             self._build_memory_read_items(
-                retrieved_memories=(
-                    retrieved_memories
+                hybrid_candidates=(
+                    hybrid_candidates
                 ),
                 rerank_results=(
                     rerank_results
@@ -746,17 +999,13 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 8. Top-K
-        #
-        # 注意：
-        # Top-K 是 Memory Read 的业务策略，
-        # 不属于通用 Reranker。
+        # 14. Top-K
         # --------------------------------------------------
 
         judge_items = items[:top_k]
 
         # --------------------------------------------------
-        # 9. Top-K Memory
+        # 15. Top-K Memory
         #        ↓
         # Generic Text[]
         # --------------------------------------------------
@@ -767,7 +1016,7 @@ class MemoryReader:
         ]
 
         # --------------------------------------------------
-        # 10. LLM Judge
+        # 16. LLM Judge
         # --------------------------------------------------
 
         decisions = self._judge.judge(
@@ -776,14 +1025,9 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 11. JudgeDecision.index
-        #        ↓
+        # 17. JudgeDecision.index
+        #          ↓
         # Top-K MemoryReadItem
-        #
-        # 写入：
-        #
-        # judge_selected
-        # judge_reason
         # --------------------------------------------------
 
         self._apply_judge_decisions(
@@ -792,10 +1036,8 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 12. Selected Memory
-        #
-        # 只提取 Judge selected=True 的 Memory。
-        # ----------------------------------------------------
+        # 18. Selected Memory
+        # --------------------------------------------------
 
         selected_texts = [
             item.memory.content
@@ -804,11 +1046,7 @@ class MemoryReader:
         ]
 
         # --------------------------------------------------
-        # 13. Memory Injection
-        #
-        # Selected Memory Texts
-        #       ↓
-        # Memory Context
+        # 19. Memory Injection
         # --------------------------------------------------
 
         memory_context = (
@@ -818,7 +1056,7 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 14. 返回完整 Memory Read Result
+        # 20. 返回完整 Memory Read Result
         # --------------------------------------------------
 
         return MemoryReadResult(

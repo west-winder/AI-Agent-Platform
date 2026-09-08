@@ -12,7 +12,7 @@ class JudgeDecision:
 
     属性：
         index:
-            Memory 在输入候选列表中的原始位置。
+            Memory 在本次 Judge 输入候选列表中的局部位置。
 
         selected:
             是否应该用于当前 Query。
@@ -57,8 +57,8 @@ class MemoryRelevanceJudge:
     5. Reranking
     6. Top-K
     7. Memory Injection
-    8. retrieval_score
-    9. rerank_score
+    8. Dense / BM25 / RRF Score
+    9. Rerank Score
     """
 
     def __init__(
@@ -334,7 +334,7 @@ reason 必须是简短字符串。
         # 某些模型即使被要求返回纯 JSON，
         # 仍可能包裹 Markdown code fence。
         #
-        # V1 允许去掉这一层包装，
+        # 当前实现允许去掉这一层包装，
         # 但不会自动修复错误 JSON。
         if (
             response.startswith("```")
