@@ -21,6 +21,27 @@ ALLOWED_RELATIONSHIPS = {
 
 
 # ==================================================
+# Relationship Contract Failure
+# ==================================================
+
+class RelationshipContractError(Exception):
+    """
+    Relationship Judge Contract 校验失败。
+
+    出现这个异常意味着：
+
+    送入 Judge 的 Existing Memories
+    没有被 Judge 完整、合法地判断。
+
+    此时必须 Fail Closed：
+
+    不得让 Pipeline
+    继续保存 Candidate，
+    也不得产生任何数据库 Lifecycle Mutation。
+    """
+
+
+# ==================================================
 # Memory Relationship Judge
 # ==================================================
 
@@ -539,3 +560,208 @@ Existing Memories:
             return MemoryRelationshipResult(
                 relationships=[]
             )
+
+
+# ==================================================
+# Relationship Judge Contract Validation
+# ==================================================
+
+def validate_relationship_coverage(
+    existing_memories,
+    relationship_result
+):
+    """
+    校验 Judge 是否完整覆盖了
+    所有送入 Judge 的 Existing Memory。
+
+    合约：
+
+    实际送入 Judge 的 memory IDs
+        ==
+    Judge 输出覆盖的 memory IDs
+
+    注意：
+
+    这里比较的不是配置 top_k，
+    而是本次真实送入 Judge 的 ID 集合。
+
+    检查项：
+
+    1. 输入 ID 无重复
+    2. 输出数量与输入数量一致
+    3. 输出 ID 集合与输入 ID 集合完全一致
+    4. 输出无重复 ID
+    5. 输出无未知 ID
+    6. relationship 合法
+    7. reason 合法
+
+    任何一项失败：
+
+    raise RelationshipContractError
+
+    本函数不修改任何数据。
+    是否 Fail Closed 由调用方决定。
+    """
+
+    if relationship_result is None:
+
+        raise RelationshipContractError(
+            "Judge 没有返回任何结果"
+        )
+
+    relationships = relationship_result.relationships
+
+    # --------------------------------------------------
+    # 输入 ID
+    # --------------------------------------------------
+
+    expected_ids = []
+
+    for memory in existing_memories:
+
+        memory_id = getattr(
+            memory,
+            "memory_id",
+            None
+        )
+
+        if not isinstance(
+            memory_id,
+            int
+        ):
+
+            raise RelationshipContractError(
+                "Existing Memory 缺少合法的 "
+                f"memory_id：{memory_id!r}"
+            )
+
+        expected_ids.append(
+            memory_id
+        )
+
+    if len(
+        set(expected_ids)
+    ) != len(
+        expected_ids
+    ):
+
+        raise RelationshipContractError(
+            "送入 Judge 的 Existing Memory "
+            f"存在重复 ID：{expected_ids}"
+        )
+
+    expected_id_set = set(
+        expected_ids
+    )
+
+    # --------------------------------------------------
+    # 输出数量
+    # --------------------------------------------------
+
+    if len(
+        relationships
+    ) != len(
+        expected_ids
+    ):
+
+        raise RelationshipContractError(
+            "Judge 输出数量 "
+            f"{len(relationships)} "
+            "与送入 Judge 的 Existing Memory 数量 "
+            f"{len(expected_ids)} 不一致"
+        )
+
+    # --------------------------------------------------
+    # 逐项校验
+    # --------------------------------------------------
+
+    seen_ids = set()
+
+    for relationship in relationships:
+
+        memory_id = relationship.memory_id
+
+        # ----------------------------------------------
+        # memory_id 类型
+        # ----------------------------------------------
+
+        if not isinstance(
+            memory_id,
+            int
+        ):
+
+            raise RelationshipContractError(
+                "Judge 输出的 memory_id "
+                f"不是 int：{memory_id!r}"
+            )
+
+        # ----------------------------------------------
+        # 未知 ID
+        # ----------------------------------------------
+
+        if memory_id not in expected_id_set:
+
+            raise RelationshipContractError(
+                "Judge 输出了未知 memory_id："
+                f"{memory_id}"
+            )
+
+        # ----------------------------------------------
+        # 重复 ID
+        # ----------------------------------------------
+
+        if memory_id in seen_ids:
+
+            raise RelationshipContractError(
+                "Judge 输出了重复 memory_id："
+                f"{memory_id}"
+            )
+
+        seen_ids.add(
+            memory_id
+        )
+
+        # ----------------------------------------------
+        # relationship 合法性
+        # ----------------------------------------------
+
+        if relationship.relationship not in (
+            ALLOWED_RELATIONSHIPS
+        ):
+
+            raise RelationshipContractError(
+                "Judge 输出了非法 relationship："
+                f"{relationship.relationship!r}"
+            )
+
+        # ----------------------------------------------
+        # reason 合法性
+        # ----------------------------------------------
+
+        if not isinstance(
+            relationship.reason,
+            str
+        ):
+
+            raise RelationshipContractError(
+                "Judge 输出的 reason "
+                "不是 str"
+            )
+
+        if not relationship.reason.strip():
+
+            raise RelationshipContractError(
+                f"Judge 输出的 reason 为空："
+                f"memory_id={memory_id}"
+            )
+
+    # --------------------------------------------------
+    # 完整覆盖
+    # --------------------------------------------------
+
+    if seen_ids != expected_id_set:
+
+        raise RelationshipContractError(
+            "Judge 没有完整覆盖所有 "
+            "送入 Judge 的 Existing Memory"
+        )

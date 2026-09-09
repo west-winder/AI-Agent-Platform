@@ -32,6 +32,9 @@ env/
 *.sqlite
 *.sqlite3
 
+# Migration 自动备份
+*.db.bak-*
+
 
 # =====================
 # IDE

@@ -7,6 +7,35 @@ from backend.schemas.memory_similarity import (
 )
 
 
+# ==================================================
+# Related Retrieval Failure
+# ==================================================
+
+class MemorySimilarityError(Exception):
+    """
+    Related Retrieval 本身失败。
+
+    例如：
+
+    1. Embedding 模型加载失败
+    2. Embedding 调用失败
+    3. Similarity 计算运行时异常
+
+    必须区分：
+
+    真实搜索成功但没有 match
+        → matches=[]
+        → 可以继续
+
+    Retrieval 本身失败
+        → MemorySimilarityError
+        → Fail Closed
+
+    不允许把系统故障
+    伪装成"没有相关 Memory"。
+    """
+
+
 class MemorySimilarity:
     """
     MemorySimilarity 负责：
@@ -27,7 +56,26 @@ class MemorySimilarity:
             # 延迟导入 Embedder
             from backend.embedding.embedder import Embedder
 
-            self._embedder = Embedder()
+            # ------------------------------------------
+            # Embedding 模型不可用时，
+            # 属于 Retrieval Failure，
+            # 必须向上抛错，
+            # 不能退化成"没有相关 Memory"。
+            # ------------------------------------------
+
+            try:
+
+                self._embedder = Embedder()
+
+            except MemorySimilarityError:
+                raise
+
+            except Exception as e:
+
+                raise MemorySimilarityError(
+                    "Embedding 模型初始化失败："
+                    f"{e}"
+                ) from e
 
     def _cosine(self, a, b) -> float:
         # a, b 可以是 list 或 numpy.ndarray
@@ -67,19 +115,50 @@ class MemorySimilarity:
         try:
             candidate_vec = self._embedder.embed(candidate.content)
             mem_vecs = self._embedder.embed_batch(texts)
-        except Exception as e:
-            # 如果 embed 失败，返回空结果，交由上层决策（通常会直接保存）
-            return MemorySimilaritySearchResult(
-                matches=[],
-                threshold=threshold,
-                top_k=top_k,
-            )
+        except MemorySimilarityError:
+            raise
 
-        # 计算相似度
-        scored = []
-        for mem, vec in zip(memories, mem_vecs):
-            sim = self._cosine(candidate_vec, vec)
-            scored.append((mem, sim))
+        except Exception as e:
+
+            # ------------------------------------------
+            # Embedding 失败属于 Retrieval Failure。
+            #
+            # 旧实现在这里返回 matches=[]，
+            # 会把系统故障误判为
+            # "没有相关 Memory"，
+            # 导致 Candidate 被直接保存。
+            #
+            # Lifecycle V1 要求 Fail Closed。
+            # ------------------------------------------
+
+            raise MemorySimilarityError(
+                "Embedding 执行失败："
+                f"{e}"
+            ) from e
+
+        # ----------------------------------------------
+        # Similarity 计算
+        #
+        # 这里同样属于 Retrieval 的一部分。
+        # 运行时异常必须 Fail Closed。
+        # ----------------------------------------------
+
+        try:
+
+            scored = []
+            for mem, vec in zip(memories, mem_vecs):
+                sim = self._cosine(candidate_vec, vec)
+                scored.append((mem, sim))
+
+        except MemorySimilarityError:
+            raise
+
+        except Exception as e:
+
+            raise MemorySimilarityError(
+                "Similarity 计算失败："
+                f"{e}"
+            ) from e
 
         # 按相似度排序并取 top_k
         scored.sort(key=lambda x: x[1], reverse=True)
