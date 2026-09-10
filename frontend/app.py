@@ -170,6 +170,67 @@ def delete_conversation_frontend(conversation_id):
 # Message
 # ==================================================
 
+def to_gradio_messages(messages):
+    """
+    Backend Message[]
+        ↓
+    Gradio Chatbot messages format
+
+    当前安装的 Gradio 版本（6.x）中，
+    gr.Chatbot 不再支持旧的 tuple / list pair 格式，
+    只接受：
+
+        [
+            {
+                "role": "user",
+                "content": "..."
+            },
+            {
+                "role": "assistant",
+                "content": "..."
+            }
+        ]
+
+    这是整个 Gradio Chatbot 边界的
+    唯一转换入口。
+
+    UI 只展示：
+
+        user
+        assistant
+
+    其余 role（如果后端未来出现）
+    不在这里发明转换行为，
+    直接跳过。
+    """
+
+    gradio_messages = []
+
+    for message in messages or []:
+
+        if not isinstance(message, dict):
+            continue
+
+        role = message.get("role")
+
+        content = message.get("content")
+
+        if role not in ("user", "assistant"):
+            continue
+
+        if not isinstance(content, str):
+            continue
+
+        gradio_messages.append(
+            {
+                "role": role,
+                "content": content,
+            }
+        )
+
+    return gradio_messages
+
+
 def load_messages(title, conversation_map):
     if title is None:
         return [], None
@@ -186,22 +247,7 @@ def load_messages(title, conversation_map):
 
     messages = response.json()
 
-    history = []
-    temp = []
-
-    for msg in messages:
-        temp.append(msg)
-
-    # 数据库格式:
-    # user
-    # assistant
-    # 转换为 Gradio 格式:
-    # [["问题", "回答"]]
-    for i in range(0, len(temp), 2):
-        if i + 1 < len(temp):
-            history.append([temp[i]["content"], temp[i + 1]["content"]])
-
-    return history, conversation_id
+    return to_gradio_messages(messages), conversation_id
 
 
 # ==================================================
@@ -209,12 +255,24 @@ def load_messages(title, conversation_map):
 # ==================================================
 
 def chat(message, history, conversation_id):
-    if history is None:
-        history = []
+    """
+    发送一条用户消息。
+
+    返回值必须与 load_messages()
+    使用同一个 Gradio messages Contract，
+    不能混用 tuple / list pair 格式。
+    """
+
+    gradio_messages = to_gradio_messages(history)
 
     if conversation_id is None:
-        history.append(["", "请先创建聊天"])
-        return history, ""
+        gradio_messages.append(
+            {
+                "role": "assistant",
+                "content": "请先创建聊天",
+            }
+        )
+        return gradio_messages, ""
 
     response = requests.post(
         f"{BASE_URL}/chat",
@@ -225,14 +283,38 @@ def chat(message, history, conversation_id):
     )
 
     if response.status_code != 200:
-        history.append([message, "请求失败"])
-        return history, ""
+        gradio_messages.append(
+            {
+                "role": "user",
+                "content": message,
+            }
+        )
+        gradio_messages.append(
+            {
+                "role": "assistant",
+                "content": "请求失败",
+            }
+        )
+        return gradio_messages, ""
 
     data = response.json()
     answer = data["answer"]
 
-    history.append([message, answer])
-    return history, ""
+    gradio_messages.append(
+        {
+            "role": "user",
+            "content": message,
+        }
+    )
+
+    gradio_messages.append(
+        {
+            "role": "assistant",
+            "content": answer,
+        }
+    )
+
+    return gradio_messages, ""
 
 
 # ==================================================
@@ -389,14 +471,15 @@ INITIAL_CONVERSATION_MAP, _ = get_conversations()
 INITIAL_AGENT_LIST = refresh_agents()
 
 
-with gr.Blocks(
-    css="""
-    #conversation-list {
-        max-height: 420px;
-        overflow-y: auto;
-    }
-    """
-) as demo:
+CONVERSATION_LIST_CSS = """
+#conversation-list {
+    max-height: 420px;
+    overflow-y: auto;
+}
+"""
+
+
+with gr.Blocks() as demo:
     gr.Markdown(
         """
         # AI Agent Chat
@@ -595,4 +678,8 @@ if __name__ == "__main__":
 
     _gradio_routes.templates.TemplateResponse = _template_response
 
-    demo.launch()
+    # Gradio 6：css 必须传给 launch()，
+    # 不能再传给 Blocks()。
+    demo.launch(
+        css=CONVERSATION_LIST_CSS
+    )
