@@ -594,11 +594,28 @@ class BoundaryFakeMemory:
     MemoryReader 使用的 .content
     +
     print_result 使用的 .id / .memory_type
+
+    MemoryReader 现在还会读取：
+
+        .memory_status
+
+    用于构造：
+
+        MemoryRelevanceCandidate
+        MemoryInjectionItem
+
+    因此这里补上 memory_status。
+
+    默认 current：
+    本 Boundary Test 验证的是
+    Top-N / Top-K 边界行为，
+    不区分 Lifecycle 状态。
     """
 
     id: int
     content: str
     memory_type: str = "semantic"
+    memory_status: str = "current"
 
 
 class BoundaryFakeRepository:
@@ -622,8 +639,18 @@ class BoundaryFakeRepository:
     def __call__(
         self,
         db,
-        user_id
+        user_id,
+        scope=None
     ):
+        # Repository Contract 已演进为：
+        #
+        #   (db, user_id, scope=...)
+        #
+        # 这里只适配签名。
+        #
+        # 本 Fake 用于 Boundary Test，
+        # 仍然返回固定 corpus，
+        # 不解释 scope。
         self.call_count += 1
 
         return list(
@@ -828,22 +855,28 @@ class BoundaryFakeJudge:
 
     不调用 DeepSeek。
 
-    记录自己实际收到的 texts 数量。
+    记录自己实际收到的 candidates 数量。
+
+    MemoryRelevanceJudge Contract 已演进为：
+
+        candidates: list[MemoryRelevanceCandidate]
+
+    这里只适配 Contract，不解释 memory_status。
     """
 
     def __init__(self):
         self.call_count = 0
-        self.received_texts = None
+        self.received_candidates = None
 
     def judge(
         self,
         query,
-        texts
+        candidates
     ):
         self.call_count += 1
 
-        self.received_texts = list(
-            texts
+        self.received_candidates = list(
+            candidates
         )
 
         return [
@@ -855,7 +888,7 @@ class BoundaryFakeJudge:
                 )
             )
             for index in range(
-                len(texts)
+                len(candidates)
             )
         ]
 
@@ -864,26 +897,62 @@ class BoundaryFakeInjector:
     """
     Fake Injector。
 
-    记录最终进入 Context 的文本。
+    MemoryInjector Contract 已演进为：
+
+        items: list[MemoryInjectionItem]
+
+    MemoryReader 现在传入：
+
+        MemoryInjectionItem(
+            content=...,
+            memory_status=...
+        )
+
+    因此这里：
+
+    1. 记录 items
+    2. 需要拼字符串时基于 item.content
+    3. 顺带记录 memory_status
+
+    本 Fake 不会：
+
+    - 依赖 SQLAlchemy ORM
+    - 理解 Query Scope
+    - 根据 current / historical 做业务分支
+
+    它只模拟：
+
+        MemoryInjectionItem[]
+            ↓
+        context
     """
 
     def __init__(self):
-        self.received_texts = None
+        self.received_items = None
+        self.received_statuses = None
 
     def build_context(
         self,
-        texts
+        items
     ):
-        self.received_texts = list(
-            texts
+        self.received_items = list(
+            items
         )
 
-        if not texts:
+        self.received_statuses = [
+            item.memory_status
+            for item in items
+        ]
+
+        if not items:
             return ""
 
         return (
             "<memory_context>"
-            + "|".join(texts)
+            + "|".join(
+                item.content
+                for item in items
+            )
             + "</memory_context>"
         )
 
@@ -1229,12 +1298,12 @@ def test_top_n_larger_than_corpus():
     )
 
     assert (
-        len(judge.received_texts)
+        len(judge.received_candidates)
         == corpus_size
     ), (
         "top_k=5 但只有 3 条 Candidate 时，"
         "Judge 应该只处理 3 条，"
-        f"实际 {len(judge.received_texts)} 条"
+        f"实际 {len(judge.received_candidates)} 条"
     )
 
     # --------------------------------------------------------
@@ -1288,10 +1357,11 @@ def test_top_n_larger_than_corpus():
     # --------------------------------------------------------
 
     assert (
-        len(injector.received_texts)
+        len(injector.received_items)
         == corpus_size
     ), (
-        "Injector 收到的文本数量不是 3"
+        "Injector 收到的 "
+        "MemoryInjectionItem 数量不是 3"
     )
 
     assert (

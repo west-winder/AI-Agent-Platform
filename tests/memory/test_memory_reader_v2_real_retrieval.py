@@ -22,7 +22,27 @@ from backend.memory.memory_read.memory_relevance_judge import (
 
 @dataclass
 class FakeMemory:
+    """
+    MemoryReader 现在会读取：
+
+        memory.content
+        memory.memory_status
+
+    用于构造：
+
+        MemoryRelevanceCandidate
+        MemoryInjectionItem
+
+    因此这里补上 memory_status。
+
+    默认 current：
+    本文件验证的是 Retrieval / Reranker，
+    不区分 Lifecycle 状态。
+    """
+
     content: str
+
+    memory_status: str = "current"
 
 
 # ==================================================
@@ -79,8 +99,15 @@ memories = [
 
 def fake_repository(
     db,
-    user_id
+    user_id,
+    scope=None
 ):
+    # Repository Contract 已演进为：
+    #
+    #   (db, user_id, scope=...)
+    #
+    # 这里只适配签名，不解释 scope，
+    # 本文件仍然返回固定 corpus。
     return memories
 
 
@@ -95,15 +122,26 @@ def fake_repository(
 
 
 class FakeJudge:
+    """
+    MemoryRelevanceJudge Contract 已演进为：
+
+        candidates: list[MemoryRelevanceCandidate]
+
+    这里只适配 Contract，不解释 memory_status。
+    """
 
     def judge(
         self,
         query,
-        texts
+        candidates
     ):
         decisions = []
 
-        for index, text in enumerate(texts):
+        for index, candidate in enumerate(
+            candidates
+        ):
+
+            text = candidate.content
 
             selected = (
                 "22ecfec" in text
@@ -130,17 +168,57 @@ class FakeJudge:
 
 
 class FakeInjector:
+    """
+    MemoryInjector Contract 已演进为：
+
+        items: list[MemoryInjectionItem]
+
+    MemoryReader 现在传入：
+
+        MemoryInjectionItem(
+            content=...,
+            memory_status=...
+        )
+
+    因此这里：
+
+    1. 记录 items
+    2. 需要拼字符串时基于 item.content
+    3. 顺带记录 memory_status
+
+    本 Fake 不会：
+
+    - 依赖 SQLAlchemy ORM
+    - 理解 Query Scope
+    - 根据 current / historical 做业务分支
+    """
+
+    def __init__(self):
+        self.received_items = None
+        self.received_statuses = None
 
     def build_context(
         self,
-        texts
+        items
     ):
-        if not texts:
+        self.received_items = list(
+            items
+        )
+
+        self.received_statuses = [
+            item.memory_status
+            for item in items
+        ]
+
+        if not items:
             return ""
 
         return (
             "<memory_context>"
-            + "|".join(texts)
+            + "|".join(
+                item.content
+                for item in items
+            )
             + "</memory_context>"
         )
 

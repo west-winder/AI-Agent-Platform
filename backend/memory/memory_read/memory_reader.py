@@ -9,6 +9,14 @@ from backend.memory.memory_read.memory_repository import (
     get_memories_for_read
 )
 
+from backend.memory.memory_read.memory_query_scope_judge import (
+    MemoryQueryScopeJudge
+)
+
+from backend.memory.memory_read.memory_query_scope import (
+    MemoryQueryScopeDecision
+)
+
 from backend.memory.memory_read.dense_retriever import (
     DenseMemoryRetriever,
     DenseRetrievedMemory
@@ -25,6 +33,7 @@ from backend.retrieval.rrf import (
 )
 
 from backend.memory.memory_read.memory_relevance_judge import (
+    MemoryRelevanceCandidate,
     MemoryRelevanceJudge,
     JudgeDecision
 )
@@ -35,6 +44,7 @@ from backend.reranking.reranker import (
 )
 
 from backend.memory.memory_read.memory_injector import (
+    MemoryInjectionItem,
     MemoryInjector
 )
 
@@ -123,11 +133,26 @@ class MemoryReadResult:
     """
     一次完整 Memory Read 的运行结果。
 
-    items 按照 Reranker 最终排序保存。
+    items:
+        按照 Reranker 最终排序保存。
 
     memory_context:
         Judge 最终选中的 Memory，
         经过 MemoryInjector 后生成的上下文。
+
+    scope_decision:
+        本次 Memory Read 的 Retrieval Scope
+        判断结果。
+
+        保存：
+
+        current / historical / both
+        +
+        reason
+        +
+        source
+
+        包括 Early Return 场景。
     """
 
     query: str
@@ -135,6 +160,8 @@ class MemoryReadResult:
     items: list[MemoryReadItem]
 
     memory_context: str = ""
+
+    scope_decision: MemoryQueryScopeDecision | None = None
 
 
 # ==================================================
@@ -144,10 +171,16 @@ class MemoryReadResult:
 
 class MemoryReader:
     """
-    Memory Read V2 Pipeline Orchestrator。
+    Memory Read Pipeline Orchestrator。
 
     负责组织：
 
+    Query
+        ↓
+    Memory Query Scope Judge
+        ↓
+    current / historical / both
+        ↓
     Repository
         ↓
     Memory[]
@@ -185,14 +218,25 @@ class MemoryReader:
         rrf_callable: Callable | None = None,
         reranker=None,
         judge=None,
-        injector=None
+        injector=None,
+        scope_judge=None
     ):
         """
         初始化 MemoryReader。
 
         所有核心组件均支持依赖注入，
         方便 Controlled Test 使用 Fake Component。
+
+        注意：
+
+        scope_judge 放在参数列表最后，
+        避免破坏旧的 positional argument 调用。
         """
+
+        if scope_judge is None:
+            scope_judge = (
+                MemoryQueryScopeJudge()
+            )
 
         if repository_callable is None:
             repository_callable = (
@@ -226,6 +270,10 @@ class MemoryReader:
 
         self._repository_callable = (
             repository_callable
+        )
+
+        self._scope_judge = (
+            scope_judge
         )
 
         self._dense_retriever = (
@@ -755,6 +803,10 @@ class MemoryReader:
 
         Query
             ↓
+        Query Scope Judge
+            ↓
+        current / historical / both
+            ↓
         Memory Repository
             ↓
         Memory[]
@@ -799,12 +851,45 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 2. Repository
+        # 2. Query Scope Judge
+        #
+        # Query
+        #   ↓
+        # current / historical / both
+        #
+        # MemoryReader 不解释 scope，
+        # 只把 decision.scope 传给 Repository。
+        # --------------------------------------------------
+
+        scope_decision = (
+            self._scope_judge.judge(
+                query
+            )
+        )
+
+        if not isinstance(
+            scope_decision,
+            MemoryQueryScopeDecision
+        ):
+            raise TypeError(
+                "Memory Query Scope Judge "
+                "必须返回 MemoryQueryScopeDecision"
+            )
+
+        # --------------------------------------------------
+        # 3. Repository
+        #
+        # user_id
+        # +
+        # scope
+        #   ↓
+        # Retrieval Corpus
         # --------------------------------------------------
 
         memories = self._repository_callable(
             db,
-            user_id
+            user_id,
+            scope=scope_decision.scope
         )
 
         if not isinstance(memories, list):
@@ -814,13 +899,14 @@ class MemoryReader:
             )
 
         # --------------------------------------------------
-        # 3. 用户没有任何 Memory
+        # 4. 用户没有任何 Memory
         # --------------------------------------------------
 
         if not memories:
             return MemoryReadResult(
                 query=query,
-                items=[]
+                items=[],
+                scope_decision=scope_decision
             )
 
 
@@ -830,7 +916,7 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 4. Dense Retrieval
+        # 5. Dense Retrieval
         #
         # Memory[]
         #    ↓
@@ -846,7 +932,7 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 5. Memory ORM
+        # 6. Memory ORM
         #      ↓
         # Generic Text[]
         #
@@ -859,7 +945,7 @@ class MemoryReader:
         ]
 
         # --------------------------------------------------
-        # 6. BM25 Index
+        # 7. BM25 Index
         #
         # 当前 Memory 数据规模很小，
         # 每次 Read 临时建立 BM25 Index。
@@ -870,7 +956,7 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 7. BM25 Retrieval
+        # 8. BM25 Retrieval
         # --------------------------------------------------
 
         bm25_results = (
@@ -881,7 +967,7 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 8. Dense / BM25
+        # 9. Dense / BM25
         #        ↓
         # 原始 memories[] index ranking
         # --------------------------------------------------
@@ -898,7 +984,7 @@ class MemoryReader:
         ]
 
         # --------------------------------------------------
-        # 9. RRF
+        # 10. RRF
         #
         # RRF 不关心：
         #
@@ -921,11 +1007,12 @@ class MemoryReader:
         if not rrf_results:
             return MemoryReadResult(
                 query=query,
-                items=[]
+                items=[],
+                scope_decision=scope_decision
             )
 
         # --------------------------------------------------
-        # 10. 构建 Hybrid Candidate
+        # 11. 构建 Hybrid Candidate
         #
         # Dense Score
         # BM25 Score
@@ -947,11 +1034,12 @@ class MemoryReader:
         if not hybrid_candidates:
             return MemoryReadResult(
                 query=query,
-                items=[]
+                items=[],
+                scope_decision=scope_decision
             )
 
         # --------------------------------------------------
-        # 11. Hybrid Business Object
+        # 12. Hybrid Business Object
         #          ↓
         #      Generic Text[]
         #
@@ -965,7 +1053,7 @@ class MemoryReader:
         ]
 
         # --------------------------------------------------
-        # 12. Reranker
+        # 13. Reranker
         # --------------------------------------------------
 
         self._ensure_reranker()
@@ -978,7 +1066,7 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 13. RerankResult.index
+        # 14. RerankResult.index
         #          ↓
         # HybridMemoryCandidate[]
         #          ↓
@@ -999,33 +1087,56 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 14. Top-K
+        # 15. Top-K
         # --------------------------------------------------
 
         judge_items = items[:top_k]
 
         # --------------------------------------------------
-        # 15. Top-K Memory
-        #        ↓
-        # Generic Text[]
+        # 16. MemoryReadItem[]
+        #          ↓
+        # MemoryRelevanceCandidate[]
+        #
+        # MemoryReader 只做 Data Adaptation。
+        #
+        # 它不解释 memory_status，
+        # 只把 content + memory_status
+        # 转换为 Judge 的输入 Contract。
         # --------------------------------------------------
 
-        judge_texts = [
-            item.memory.content
+        judge_candidates = [
+            MemoryRelevanceCandidate(
+                content=(
+                    item.memory.content
+                ),
+                memory_status=(
+                    item.memory.memory_status
+                )
+            )
             for item in judge_items
         ]
 
         # --------------------------------------------------
-        # 16. LLM Judge
+        # 17. Memory Relevance Judge
+        #
+        # Query
+        # +
+        # MemoryRelevanceCandidate[]
+        #   ↓
+        # JudgeDecision[]
         # --------------------------------------------------
 
-        decisions = self._judge.judge(
-            query=query,
-            texts=judge_texts
+        decisions = (
+            self._judge.judge(
+                query=query,
+                candidates=(
+                    judge_candidates
+                )
+            )
         )
 
         # --------------------------------------------------
-        # 17. JudgeDecision.index
+        # 18. JudgeDecision.index
         #          ↓
         # Top-K MemoryReadItem
         # --------------------------------------------------
@@ -1036,31 +1147,37 @@ class MemoryReader:
         )
 
         # --------------------------------------------------
-        # 18. Selected Memory
+        # 19. Selected Memory
         # --------------------------------------------------
 
-        selected_texts = [
-            item.memory.content
+        selected_injection_items = [
+            MemoryInjectionItem(
+                content=item.memory.content,
+                memory_status=(
+                    item.memory.memory_status
+                )
+            )
             for item in items
             if item.judge_selected is True
         ]
 
         # --------------------------------------------------
-        # 19. Memory Injection
+        # 20. Memory Injection
         # --------------------------------------------------
 
         memory_context = (
             self._injector.build_context(
-                selected_texts
+                selected_injection_items
             )
         )
 
         # --------------------------------------------------
-        # 20. 返回完整 Memory Read Result
+        # 21. 返回完整 Memory Read Result
         # --------------------------------------------------
 
         return MemoryReadResult(
             query=query,
             items=items,
-            memory_context=memory_context
+            memory_context=memory_context,
+            scope_decision=scope_decision
         )
