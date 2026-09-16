@@ -98,7 +98,7 @@ class MemoryValidator:
     # 第二层：LLM语义验证
     # ==================================================
 
-    def validate_with_llm(
+    async def validate_with_llm(
         self,
         candidate: MemoryCandidate
     ) -> MemoryValidationResult:
@@ -305,7 +305,7 @@ class MemoryValidator:
             # 调用统一LLM Service
             # --------------------------------------------------
 
-            response = call_llm(messages)
+            response = await call_llm(messages)
 
             # --------------------------------------------------
             # 解析LLM返回的JSON
@@ -361,7 +361,7 @@ class MemoryValidator:
     # 完整Validation流程
     # ==================================================
 
-    def validate(
+    async def validate(
         self,
         candidate: MemoryCandidate
     ) -> MemoryValidationResult:
@@ -386,4 +386,4 @@ class MemoryValidator:
         # 第二阶段：LLM语义验证
         # --------------------------------------------------
 
-        return self.validate_with_llm(candidate)
+        return await self.validate_with_llm(candidate)

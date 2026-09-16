@@ -23,14 +23,14 @@ router = APIRouter(
     "",
     response_model=ChatResponse
 )
-def chat_endpoint(
+async def chat_endpoint(
     request: ChatRequest,
     db: Session = Depends(get_db)
 ):
 
     try:
 
-        result = chat(
+        result = await chat(
             db=db,
             conversation_id=request.conversation_id,
             user_message=request.content

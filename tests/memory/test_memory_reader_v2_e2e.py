@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,11 @@ from backend.memory.memory_read.memory_relevance_judge import (
     JudgeDecision
 )
 
+from backend.memory.memory_read.memory_query_scope import (
+    MEMORY_QUERY_SCOPE_CURRENT,
+    MemoryQueryScopeDecision,
+)
+
 from backend.retrieval.bm25 import (
     BM25Result
 )
@@ -31,6 +37,58 @@ from backend.retrieval.rrf import (
 from backend.reranking.reranker import (
     RerankResult
 )
+
+
+# ============================================================
+# Async Contract → 同步调用适配
+#
+# MemoryReader.read 已经是 async Contract。
+#
+# 本文件是 [MANUAL KEEP] 真实 E2E 脚本，
+# 测试函数保持同步（脚本式运行），
+# 这里只把 coroutine 驱动到底：
+#
+#     1. 直接 python 运行时会真的执行
+#     2. pytest 不会把测试静默跳过
+#     3. coroutine 一定被 await
+#     4. 不会产生假 PASS
+#
+# 真实组件（Embedding / Reranker / DeepSeek）
+# 与本地资源仍然在 asyncio.run 里执行，
+# 不改变任何生产行为。
+# ============================================================
+
+
+def run(coro):
+    """
+    在同步脚本中真实执行并等待
+    async production contract。
+    """
+
+    return asyncio.run(coro)
+
+
+class SyncMemoryReader(MemoryReader):
+    """
+    真实 MemoryReader
+    +
+    同步调用适配。
+
+    只把 async read() 的 coroutine
+    驱动到底。
+    """
+
+    def read(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().read(
+                *args,
+                **kwargs
+            )
+        )
 
 
 # ============================================================
@@ -862,13 +920,18 @@ class BoundaryFakeJudge:
         candidates: list[MemoryRelevanceCandidate]
 
     这里只适配 Contract，不解释 memory_status。
+
+    注意：
+
+    MemoryReader 现在 await self._judge.judge(...)，
+    因此本 Fake 必须保持 async Calling Contract。
     """
 
     def __init__(self):
         self.call_count = 0
         self.received_candidates = None
 
-    def judge(
+    async def judge(
         self,
         query,
         candidates
@@ -891,6 +954,82 @@ class BoundaryFakeJudge:
                 len(candidates)
             )
         ]
+
+
+class BoundaryFakeScopeJudge:
+    """
+    Fake Query Scope Judge。
+
+    为什么需要它：
+
+    CASE 5 是 Controlled Boundary Test，
+    它的 MemoryReader 必须完全不触达真实组件。
+
+    如果不注入本 Fake，
+    MemoryReader 会 fallback 到真实
+    MemoryQueryScopeJudge：
+
+        MemoryQueryScopeJudge
+            ↓
+        真实 call_llm
+            ↓
+        真实 DeepSeek（或 fallback）
+
+    那样这条 Regression 就不再是
+    真正完全受控的 deterministic 测试。
+
+    本 Fake 满足当前生产 Async Contract：
+
+        async def judge(query)
+            → MemoryQueryScopeDecision
+
+    并且：
+
+        不联网
+        不调用 call_llm
+        不加载任何模型
+        deterministic（固定 scope）
+
+    scope 固定为 current：
+
+    CASE 5 的 Query 是「我最近在学习什么？」，
+    属于询问当前状态的普通 Query，
+    与生产 fallback 行为一致。
+
+    注意：
+
+    本 Fake 不解释 Query，
+    也不参与任何业务语义变化。
+    """
+
+    def __init__(
+        self,
+        scope=MEMORY_QUERY_SCOPE_CURRENT,
+        reason="boundary fake scope reason",
+        source="fake",
+    ):
+        self._decision = (
+            MemoryQueryScopeDecision(
+                scope=scope,
+                reason=reason,
+                source=source,
+            )
+        )
+
+        self.call_count = 0
+        self.received_queries = []
+
+    async def judge(
+        self,
+        query
+    ):
+        self.call_count += 1
+
+        self.received_queries.append(
+            query
+        )
+
+        return self._decision
 
 
 class BoundaryFakeInjector:
@@ -963,6 +1102,26 @@ def test_top_n_larger_than_corpus():
 
     属于合法 Boundary，
     不是 Failure。
+
+    Test Isolation：
+
+    本用例是 Controlled Boundary Test，
+    因此 MemoryReader 的全部核心组件
+    都必须是 Fake，包括 Query Scope Judge：
+
+        Repository     Fake
+        ScopeJudge     Fake
+        Dense          Fake
+        BM25           Fake
+        RRF            Fake
+        Reranker       Fake
+        Judge          Fake
+        Injector       Fake
+
+    不注入 FakeScopeJudge 时，
+    MemoryReader 会 fallback 到真实
+    MemoryQueryScopeJudge → 真实 call_llm，
+    使这条 Regression 不再完全受控。
 
     Repository 返回 3 条 Memory，
     调用方请求：
@@ -1088,6 +1247,8 @@ def test_top_n_larger_than_corpus():
 
     judge = BoundaryFakeJudge()
 
+    scope_judge = BoundaryFakeScopeJudge()
+
     injector = BoundaryFakeInjector()
 
     # --------------------------------------------------------
@@ -1097,14 +1258,16 @@ def test_top_n_larger_than_corpus():
     #
     # 不使用：
     #   SQLite
+    #   真实 Query Scope Judge
     #   真实 Embedding
     #   真实 BM25
     #   真实 Reranker
     #   DeepSeek
     # --------------------------------------------------------
 
-    reader = MemoryReader(
+    reader = SyncMemoryReader(
         repository_callable=repository,
+        scope_judge=scope_judge,
         dense_retriever=dense,
         bm25_retriever=bm25,
         rrf_callable=rrf,
@@ -1153,6 +1316,35 @@ def test_top_n_larger_than_corpus():
     ), (
         "Repository 应该只被调用一次，"
         f"实际 {repository.call_count} 次"
+    )
+
+    # --------------------------------------------------------
+    # 1.1 Query Scope Judge 必须是注入的 Fake
+    #
+    # 证明这条 Controlled Boundary Test
+    # 没有触达真实的：
+    #
+    #     MemoryQueryScopeJudge
+    #         ↓
+    #     真实 call_llm
+    #         ↓
+    #     真实 DeepSeek
+    # --------------------------------------------------------
+
+    assert (
+        scope_judge.call_count == 1
+    ), (
+        "注入的 BoundaryFakeScopeJudge "
+        "应该只被调用一次，"
+        f"实际 {scope_judge.call_count} 次"
+    )
+
+    assert (
+        scope_judge.received_queries
+        == [query]
+    ), (
+        "BoundaryFakeScopeJudge 收到的 Query "
+        f"不符合预期：{scope_judge.received_queries}"
     )
 
     # --------------------------------------------------------
@@ -1458,7 +1650,7 @@ def main():
     # Injector     -> Real
     # --------------------------------------------------------
 
-    reader = MemoryReader()
+    reader = SyncMemoryReader()
 
     db = SessionLocal()
 

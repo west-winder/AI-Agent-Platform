@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
 from backend.services.llm_service import chat_completion
 
@@ -143,7 +143,10 @@ class MemoryRelevanceJudge:
 
     def __init__(
         self,
-        llm_callable: Callable | None = None
+        llm_callable: Callable[
+            [list[dict[str, str]]],
+            Awaitable[str]
+        ] | None = None
     ):
         """
         初始化 Memory Relevance Judge。
@@ -168,7 +171,7 @@ class MemoryRelevanceJudge:
     # Public API
     # ==================================================
 
-    def judge(
+    async def judge(
         self,
         query: str,
         candidates: list[
@@ -227,7 +230,7 @@ class MemoryRelevanceJudge:
             candidates=candidates
         )
 
-        response = self._llm_callable(
+        response = await self._llm_callable(
             messages
         )
 

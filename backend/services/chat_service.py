@@ -32,7 +32,7 @@ memory_reader = MemoryReader()
 # Chat 核心业务
 # ==================================================
 
-def chat(
+async def chat(
     db: Session,
     conversation_id: int,
     user_message: str
@@ -101,7 +101,7 @@ def chat(
     try:
 
         memory_read_result = (
-            memory_reader.read(
+            await memory_reader.read(
                 db=db,
                 user_id=conversation.user_id,
                 query=user_message,
@@ -206,7 +206,7 @@ def chat(
     # 7. 调用 Chat LLM
     # ==================================================
 
-    answer = call_llm(
+    answer = await call_llm(
         llm_messages
     )
 
@@ -237,7 +237,7 @@ def chat(
 
         pipeline = MemoryPipeline()
 
-        pipeline.process(
+        await pipeline.process(
             db=db,
             user_id=conversation.user_id,
             user_message=user_message,

@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 
@@ -49,6 +50,31 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 import backend.services.chat_service as chat_service
+
+
+# ============================================================
+# Async Contract → 同步测试适配
+#
+# ChatService.chat 已经是 async Contract。
+#
+# 本模块的测试保持同步（脚本式运行，
+# 同时可被 pytest 原生收集），
+# 因此这里只把 coroutine 驱动到底：
+#
+#     1. 直接 python 运行时会真的执行
+#     2. pytest 不会把测试静默跳过
+#     3. coroutine 一定被 await
+#     4. 不会产生假 PASS
+# ============================================================
+
+
+def run(coro):
+    """
+    在同步测试中真实执行并等待
+    async production contract。
+    """
+
+    return asyncio.run(coro)
 
 
 # ============================================================
@@ -133,9 +159,16 @@ class FakeMemoryPipeline:
 
     所以这里只提供合法接口，
     防止真实 Memory Write 被调用。
+
+    注意：
+
+    ChatService 现在 await pipeline.process(...)，
+    因此本 Fake 必须保持 async Calling Contract，
+    否则会在 ChatService 内部触发 TypeError，
+    被 Memory Write 的降级分支静默吞掉。
     """
 
-    def process(
+    async def process(
         self,
         db,
         user_id,
@@ -151,6 +184,14 @@ class FakeMemoryPipeline:
 
 
 class SuccessMemoryReader:
+    """
+    Fake Memory Reader（成功路径）。
+
+    注意：
+
+    ChatService 现在 await memory_reader.read(...)，
+    因此本 Fake 必须保持 async Calling Contract。
+    """
 
     def __init__(self):
         self.received_user_id = None
@@ -158,7 +199,7 @@ class SuccessMemoryReader:
         self.received_top_n = None
         self.received_top_k = None
 
-    def read(
+    async def read(
         self,
         db,
         user_id,
@@ -187,7 +228,7 @@ def test_memory_read_success():
 
     captured_messages = None
 
-    def fake_call_llm(messages):
+    async def fake_call_llm(messages):
 
         nonlocal captured_messages
 
@@ -228,10 +269,12 @@ def test_memory_read_success():
         )
     ):
 
-        response = chat_service.chat(
-            db=None,
-            conversation_id=1,
-            user_message=USER_MESSAGE
+        response = run(
+            chat_service.chat(
+                db=None,
+                conversation_id=1,
+                user_message=USER_MESSAGE
+            )
         )
 
     # --------------------------------------------------------
@@ -306,8 +349,18 @@ def test_memory_read_success():
 
 
 class FailingMemoryReader:
+    """
+    Fake Memory Reader（失败路径）。
 
-    def read(
+    注意：
+
+    ChatService 现在 await memory_reader.read(...)，
+    因此本 Fake 必须保持 async Calling Contract：
+    异常仍然在 await 时抛出，
+    语义与迁移前完全一致。
+    """
+
+    async def read(
         self,
         db,
         user_id,
@@ -337,7 +390,7 @@ def test_memory_read_failure_degradation():
 
     captured_messages = None
 
-    def fake_call_llm(messages):
+    async def fake_call_llm(messages):
 
         nonlocal captured_messages
 
@@ -384,10 +437,12 @@ def test_memory_read_failure_degradation():
         # 测试会直接失败。
         # ----------------------------------------------------
 
-        response = chat_service.chat(
-            db=None,
-            conversation_id=1,
-            user_message=USER_MESSAGE
+        response = run(
+            chat_service.chat(
+                db=None,
+                conversation_id=1,
+                user_message=USER_MESSAGE
+            )
         )
 
     # --------------------------------------------------------

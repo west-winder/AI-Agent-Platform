@@ -66,8 +66,32 @@ Memory Lifecycle V1 - Contract Tests
     transaction 成功 commit 后才同步：
     移除 historical，append 新建 current。
     rollback 时不得提前修改。
+
+Async Contract 注意事项：
+
+    MemoryPipeline.process
+    MemoryExtractor.extract
+    MemoryValidator.validate
+    MemoryRelationshipJudge.judge
+
+    已经是 async Contract。
+
+    本模块的 test_ 函数全部保持同步
+    def test_xxx()，由 run() 把 coroutine 驱动到底：
+
+        1. 直接 python 运行时会真的执行
+        2. pytest 会原生收集执行，
+           不会被当成 async test 静默跳过
+        3. coroutine 一定被 await
+        4. 不会产生假 PASS
+
+    Candidate 循环仍然是顺序执行的
+    （Sequential Dependency 不得改变）。
+
+    本模块不依赖 pytest-asyncio。
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -220,6 +244,69 @@ def insert_memory(
 
 
 # ============================================================
+# Async Contract → 同步测试适配
+#
+# MemoryPipeline.process
+# MemoryExtractor.extract
+# MemoryValidator.validate
+# MemoryRelationshipJudge.judge
+#
+# 都已经变成 async Contract。
+#
+# 本模块的测试函数保持同步 def test_xxx()：
+#
+#     1. 直接 python 运行时会真的执行
+#     2. pytest 会原生收集执行，
+#        不会被当成 async test 静默跳过
+#     3. coroutine 一定被 await，
+#        不会出现 coroutine was never awaited
+#     4. 不会产生假 PASS
+#
+# 本项目当前没有 pytest-asyncio，
+# 因此这里只把 coroutine 驱动到底，
+# 不复制、不绕过生产逻辑。
+#
+# 注意：
+#
+# Process 内部的 Candidate 循环仍然
+# 是顺序执行的（Sequential Dependency），
+# 这里只是等待同一个 coroutine 完成。
+# ============================================================
+
+
+def run(coro):
+    """
+    在同步测试中真实执行并等待
+    async production contract。
+    """
+
+    return asyncio.run(coro)
+
+
+class SyncMemoryPipeline(MemoryPipeline):
+    """
+    真实 MemoryPipeline
+    +
+    同步调用适配。
+
+    只把 async process() 的 coroutine
+    驱动到底。
+    """
+
+    def process(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().process(
+                *args,
+                **kwargs
+            )
+        )
+
+
+# ============================================================
 # Fake Pipeline Components
 #
 # 全部是确定性 Fake。
@@ -227,6 +314,14 @@ def insert_memory(
 # ============================================================
 
 class FakeExtractor:
+    """
+    Fake Extractor。
+
+    注意：
+
+    MemoryPipeline 现在 await self.extractor.extract(...)，
+    因此本 Fake 必须保持 async Calling Contract。
+    """
 
     def __init__(
         self,
@@ -234,7 +329,7 @@ class FakeExtractor:
     ):
         self._candidates = candidates
 
-    def extract(
+    async def extract(
         self,
         user_message
     ):
@@ -242,8 +337,16 @@ class FakeExtractor:
 
 
 class FakeValidator:
+    """
+    Fake Validator。
 
-    def validate(
+    注意：
+
+    MemoryPipeline 现在 await self.validator.validate(...)，
+    因此本 Fake 必须保持 async Calling Contract。
+    """
+
+    async def validate(
         self,
         candidate
     ):
@@ -289,6 +392,16 @@ class FakeSimilarity:
 
 
 class FakeRelationshipJudge:
+    """
+    Fake Relationship Judge。
+
+    注意：
+
+    MemoryPipeline 现在
+    await self.relationship_judge.judge(...)，
+
+    因此本 Fake 必须保持 async Calling Contract。
+    """
 
     def __init__(
         self,
@@ -296,7 +409,7 @@ class FakeRelationshipJudge:
     ):
         self._relationships = relationships
 
-    def judge(
+    async def judge(
         self,
         candidate,
         existing_memories
@@ -371,6 +484,13 @@ class CorpusAwareJudge:
 
     其他 ID
         → new
+
+    注意：
+
+    MemoryPipeline 现在
+    await self.relationship_judge.judge(...)，
+
+    因此本 Fake 必须保持 async Calling Contract。
     """
 
     def __init__(
@@ -382,7 +502,7 @@ class CorpusAwareJudge:
         )
         self.seen_ids = []
 
-    def judge(
+    async def judge(
         self,
         candidate,
         existing_memories
@@ -430,7 +550,7 @@ def build_pipeline_with_candidates(
     judge,
 ):
 
-    return MemoryPipeline(
+    return SyncMemoryPipeline(
         extractor=FakeExtractor(
             candidates
         ),
@@ -453,7 +573,7 @@ def build_pipeline(
         memory_type=candidate_type,
     )
 
-    pipeline = MemoryPipeline(
+    pipeline = SyncMemoryPipeline(
         extractor=FakeExtractor(
             [candidate]
         ),

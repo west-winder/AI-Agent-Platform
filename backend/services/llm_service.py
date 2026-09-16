@@ -2,7 +2,7 @@ from typing import List, Dict, Optional
 
 import os
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 
 # 加载.env文件
@@ -10,13 +10,13 @@ load_dotenv()
 
 
 # 初始化DeepSeek客户端
-client = OpenAI(
+client = AsyncOpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url=os.getenv("DEEPSEEK_BASE_URL")
 )
 
 
-def chat_completion(
+async def chat_completion(
     messages: List[Dict[str, str]],
     model: Optional[str] = None
 ) -> str:
@@ -45,7 +45,7 @@ def chat_completion(
 
 
     # 调用DeepSeek API
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model,
         messages=messages
     )
@@ -58,7 +58,7 @@ def chat_completion(
     return answer
 
 
-def call_llm(
+async def call_llm(
     messages: List[Dict[str, str]],
     model: Optional[str] = None
 ) -> str:
@@ -66,7 +66,7 @@ def call_llm(
     兼容旧调用接口
     """
 
-    return chat_completion(
+    return await chat_completion(
         messages,
         model
     )

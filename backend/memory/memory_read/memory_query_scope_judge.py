@@ -165,7 +165,7 @@ class MemoryQueryScopeJudge:
     # Public API
     # ==================================================
 
-    def judge(
+    async def judge(
         self,
         query: str,
     ) -> MemoryQueryScopeDecision:
@@ -215,7 +215,7 @@ class MemoryQueryScopeJudge:
         # 交给第二层 LLM。
         # --------------------------------------------------
 
-        return self._judge_by_llm(
+        return await self._judge_by_llm(
             query
         )
 
@@ -373,7 +373,7 @@ class MemoryQueryScopeJudge:
     # LLM Scope Judge
     # ==================================================
 
-    def _judge_by_llm(
+    async def _judge_by_llm(
         self,
         query: str,
     ) -> MemoryQueryScopeDecision:
@@ -538,7 +538,7 @@ current
 
         try:
 
-            response = call_llm(
+            response = await call_llm(
                 messages
             )
 

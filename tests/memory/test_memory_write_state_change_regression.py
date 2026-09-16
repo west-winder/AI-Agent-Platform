@@ -89,6 +89,7 @@ Memory Lifecycle C++ Negation Bug。
     python tests/memory/test_memory_write_state_change_regression.py
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -149,6 +150,34 @@ VALIDATOR_CALL_LLM = (
 # Helpers
 # ============================================================
 
+def run(coro):
+    """
+    在同步测试中真实执行并等待
+    async production contract。
+
+    背景：
+
+    MemoryExtractor.extract /
+    MemoryValidator.validate
+
+    都已经变成 async Contract。
+
+    本模块的测试函数保持同步 def test_xxx()：
+
+        1. 直接 python 运行时会真的执行
+        2. pytest 会原生收集执行，
+           不会被当成 async test 静默跳过
+        3. coroutine 一定被 await，
+           不会出现 coroutine was never awaited
+        4. 不会产生假 PASS
+
+    这里只负责把 coroutine 驱动到底，
+    不参与任何业务断言。
+    """
+
+    return asyncio.run(coro)
+
+
 def run_extractor(
     user_message: str,
     llm_response: str,
@@ -162,7 +191,7 @@ def run_extractor(
 
     captured = {}
 
-    def fake_call_llm(messages, *args, **kwargs):
+    async def fake_call_llm(messages, *args, **kwargs):
 
         captured["messages"] = messages
 
@@ -173,8 +202,10 @@ def run_extractor(
         side_effect=fake_call_llm,
     ):
 
-        candidates = MemoryExtractor().extract(
-            user_message
+        candidates = run(
+            MemoryExtractor().extract(
+                user_message
+            )
         )
 
     return captured, candidates
@@ -193,7 +224,7 @@ def run_validator(
 
     captured = {}
 
-    def fake_call_llm(messages, *args, **kwargs):
+    async def fake_call_llm(messages, *args, **kwargs):
 
         captured["messages"] = messages
 
@@ -204,8 +235,10 @@ def run_validator(
         side_effect=fake_call_llm,
     ):
 
-        result = MemoryValidator().validate(
-            candidate
+        result = run(
+            MemoryValidator().validate(
+                candidate
+            )
         )
 
     return captured, result

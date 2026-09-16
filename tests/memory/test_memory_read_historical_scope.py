@@ -38,6 +38,26 @@ Historical Memory Retrieval - Deterministic [KEEP] Tests
     所有外部依赖均使用 Fake Component / monkeypatch，
     Repository 测试使用隔离的 SQLite In-Memory DB。
 
+Async Contract 注意事项：
+
+    MemoryQueryScopeJudge.judge
+    MemoryReader.read
+
+    已经是 async Contract。
+
+    本模块的 test_ 函数全部保持同步
+    def test_xxx()，由 run() 把 coroutine 驱动到底
+    （SyncQueryScopeJudge / SyncMemoryReader 只是
+    把 coroutine 驱动到底的调用适配）：
+
+        1. 直接 python 运行时会真的执行
+        2. pytest 会原生收集执行，
+           不会被当成 async test 静默跳过
+        3. coroutine 一定被 await
+        4. 不会产生假 PASS
+
+    本模块不依赖 pytest-asyncio。
+
 运行方式：
 
     1. 作为脚本运行（项目现有测试约定）：
@@ -50,6 +70,7 @@ Historical Memory Retrieval - Deterministic [KEEP] Tests
 """
 
 
+import asyncio
 import sys
 import json
 from dataclasses import dataclass
@@ -212,12 +233,98 @@ def assert_scope_decision(
     )
 
 
+# ============================================================
+# Async Contract → 同步测试适配
+#
+# MemoryQueryScopeJudge.judge
+# MemoryReader.read
+#
+# 都已经变成 async Contract。
+#
+# 本模块的测试函数保持同步 def test_xxx()：
+#
+#     1. 直接 python 运行时会真的执行
+#     2. pytest 会原生收集执行，
+#        不会被当成 async test 静默跳过
+#     3. coroutine 一定被 await，
+#        不会出现 coroutine was never awaited
+#     4. 不会产生假 PASS
+#
+# 本项目当前没有 pytest-asyncio，
+# 因此这里只把 coroutine 驱动到底，
+# 不复制、不绕过生产逻辑。
+# ============================================================
+
+
+def run(coro):
+    """
+    在同步测试中真实执行并等待
+    async production contract。
+    """
+
+    return asyncio.run(coro)
+
+
+class SyncQueryScopeJudge(MemoryQueryScopeJudge):
+    """
+    真实 MemoryQueryScopeJudge
+    +
+    同步调用适配。
+
+    只把 async judge() 的 coroutine
+    驱动到底。
+    """
+
+    def judge(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().judge(
+                *args,
+                **kwargs
+            )
+        )
+
+
+class SyncMemoryReader(MemoryReader):
+    """
+    真实 MemoryReader
+    +
+    同步调用适配。
+
+    只把 async read() 的 coroutine
+    驱动到底。
+    """
+
+    def read(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().read(
+                *args,
+                **kwargs
+            )
+        )
+
+
 class FakeLLM:
     """
     Fake call_llm。
 
     记录自己被调用的次数与收到的 messages，
     返回预设响应或抛出预设异常。
+
+    注意：
+
+    MemoryQueryScopeJudge 现在
+    await call_llm(messages)，
+
+    因此本 Fake 必须保持同样的
+    async Calling Contract。
     """
 
     def __init__(
@@ -231,7 +338,7 @@ class FakeLLM:
         self.call_count = 0
         self.received_messages = None
 
-    def __call__(
+    async def __call__(
         self,
         messages
     ):
@@ -421,7 +528,7 @@ def test_rule_layer_historical_query():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我以前主要学什么？"
             )
@@ -460,7 +567,7 @@ def test_rule_layer_current_query():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我现在主要学什么？"
             )
@@ -499,7 +606,7 @@ def test_rule_layer_both_query():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我从以前到现在"
                 "最大的变化是什么？"
@@ -544,7 +651,7 @@ def test_rule_layer_defers_mixed_markers_to_llm():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我现在想知道"
                 "我以前主要学什么？"
@@ -590,7 +697,7 @@ def test_rule_layer_defers_no_marker_query_to_llm():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我为什么从 Python "
                 "转向 Java？"
@@ -625,7 +732,7 @@ def test_llm_layer_scope_current():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈现状如何？"
             )
@@ -646,7 +753,7 @@ def test_llm_layer_scope_historical():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈经历过什么？"
             )
@@ -667,7 +774,7 @@ def test_llm_layer_scope_both():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈经历过什么？"
             )
@@ -693,7 +800,7 @@ def test_llm_layer_scope_is_normalized():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈经历过什么？"
             )
@@ -735,7 +842,7 @@ def test_llm_layer_scope_kept_when_reason_missing():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈经历过什么？"
             )
@@ -773,7 +880,7 @@ def test_llm_layer_scope_kept_when_reason_blank():
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈经历过什么？"
             )
@@ -811,7 +918,7 @@ def assert_fallback_current(
     with patch_call_llm(fake_llm):
 
         decision = (
-            MemoryQueryScopeJudge()
+            SyncQueryScopeJudge()
             .judge(
                 "我的技术栈经历过什么？"
             )
@@ -931,7 +1038,7 @@ def test_judge_rejects_non_string_query():
     TypeError
     """
 
-    judge = MemoryQueryScopeJudge()
+    judge = SyncQueryScopeJudge()
 
     fake_llm = FakeLLM(
         response=llm_json("current")
@@ -973,7 +1080,7 @@ def test_judge_rejects_empty_query():
     ValueError
     """
 
-    judge = MemoryQueryScopeJudge()
+    judge = SyncQueryScopeJudge()
 
     try:
 
@@ -995,7 +1102,7 @@ def test_judge_rejects_blank_query():
     ValueError
     """
 
-    judge = MemoryQueryScopeJudge()
+    judge = SyncQueryScopeJudge()
 
     for bad_query in (
         "   ",
@@ -1291,6 +1398,14 @@ class FakeScopeJudge:
     Fake Scope Judge。
 
     不调用 DeepSeek。
+
+    注意：
+
+    MemoryReader 现在
+    await self._scope_judge.judge(...)，
+
+    因此本 Fake 必须保持同样的
+    async Calling Contract。
     """
 
     def __init__(
@@ -1310,7 +1425,7 @@ class FakeScopeJudge:
         self.call_count = 0
         self.received_queries = []
 
-    def judge(
+    async def judge(
         self,
         query
     ):
@@ -1523,6 +1638,11 @@ class FakeJudge:
 
     这里只记录收到的 candidates，
     不解释 memory_status。
+
+    注意：
+
+    MemoryReader 现在 await self._judge.judge(...)，
+    因此本 Fake 必须保持 async Calling Contract。
     """
 
     def __init__(
@@ -1534,7 +1654,7 @@ class FakeJudge:
         self.call_count = 0
         self.received_candidates = None
 
-    def judge(
+    async def judge(
         self,
         query,
         candidates
@@ -1605,7 +1725,7 @@ def build_reader(
         memories
     )
 
-    reader = MemoryReader(
+    reader = SyncMemoryReader(
         repository_callable=repository,
         scope_judge=scope_judge,
         dense_retriever=FakeDenseRetriever(),

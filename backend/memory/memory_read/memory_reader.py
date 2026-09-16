@@ -788,7 +788,7 @@ class MemoryReader:
     # Public API
     # ==================================================
 
-    def read(
+    async def read(
         self,
         db: Session,
         user_id: int,
@@ -861,10 +861,8 @@ class MemoryReader:
         # 只把 decision.scope 传给 Repository。
         # --------------------------------------------------
 
-        scope_decision = (
-            self._scope_judge.judge(
-                query
-            )
+        scope_decision = await self._scope_judge.judge(
+            query
         )
 
         if not isinstance(
@@ -1126,13 +1124,9 @@ class MemoryReader:
         # JudgeDecision[]
         # --------------------------------------------------
 
-        decisions = (
-            self._judge.judge(
-                query=query,
-                candidates=(
-                    judge_candidates
-                )
-            )
+        decisions = await self._judge.judge(
+            query=query,
+            candidates=judge_candidates
         )
 
         # --------------------------------------------------

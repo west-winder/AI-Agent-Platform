@@ -196,7 +196,7 @@ class MemoryPipeline:
     # Pipeline
     # ==================================================
 
-    def process(
+    async def process(
         self,
         db: Session,
         user_id: int,
@@ -214,7 +214,7 @@ class MemoryPipeline:
         # Step 1：Memory Extraction
         # ==================================================
 
-        candidates = self.extractor.extract(
+        candidates = await self.extractor.extract(
             user_message
         )
 
@@ -253,7 +253,7 @@ class MemoryPipeline:
             # 3.1 Validation
             # ==================================================
 
-            validation_result = self.validator.validate(
+            validation_result = await self.validator.validate(
                 candidate
             )
 
@@ -340,11 +340,9 @@ class MemoryPipeline:
 
             else:
 
-                relationship_result = (
-                    self.relationship_judge.judge(
-                        candidate,
-                        similar_memories,
-                    )
+                relationship_result = await self.relationship_judge.judge(
+                    candidate,
+                    similar_memories,
                 )
 
                 # ----------------------------------------------

@@ -53,6 +53,7 @@ Historical Memory Retrieval V1
 """
 
 
+import asyncio
 import sys
 import hashlib
 import sqlite3
@@ -93,6 +94,46 @@ import backend.memory.memory_read.memory_query_scope_judge as scope_judge_module
 from backend.services.llm_service import (  # noqa: E402
     call_llm as real_call_llm,
 )
+
+
+# ============================================================
+# Async Contract → 同步调用适配
+#
+# MemoryReader.read 已经是 async Contract。
+#
+# 本文件是 [MANUAL KEEP] 真实运行验证，
+# main() 保持同步（脚本式运行），
+# 这里只把 coroutine 驱动到底。
+# ============================================================
+
+
+def run(coro):
+    """
+    在同步脚本中真实执行并等待
+    async production contract。
+    """
+
+    return asyncio.run(coro)
+
+
+class SyncMemoryReader(MemoryReader):
+    """
+    真实 MemoryReader
+    +
+    同步调用适配。
+    """
+
+    def read(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().read(
+                *args,
+                **kwargs
+            )
+        )
 
 
 DB_PATH = PROJECT_ROOT / "test.db"
@@ -255,6 +296,16 @@ class RecordingScopeLLM:
 
     记录 Scope Judge 是否真的调用了 LLM，
     然后原样调用真实 call_llm。
+
+    注意：
+
+    MemoryQueryScopeJudge 现在
+    await call_llm(messages)，
+
+    真实 call_llm 也已经是 async，
+    因此本 Recorder 必须保持同样的
+    async Calling Contract，
+    并且 await 真实调用。
     """
 
     def __init__(
@@ -267,13 +318,13 @@ class RecordingScopeLLM:
 
         self.call_count = 0
 
-    def __call__(
+    async def __call__(
         self,
         messages
     ):
         self.call_count += 1
 
-        return self._real_call_llm(
+        return await self._real_call_llm(
             messages
         )
 
@@ -515,7 +566,7 @@ def main():
         RecordingInjector()
     )
 
-    reader = MemoryReader(
+    reader = SyncMemoryReader(
         repository_callable=(
             repository_recorder
         ),

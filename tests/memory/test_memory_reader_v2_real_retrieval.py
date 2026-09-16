@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,46 @@ from backend.memory.memory_read.memory_reader import (
 from backend.memory.memory_read.memory_relevance_judge import (
     JudgeDecision,
 )
+
+
+# ==================================================
+# Async Contract → 同步调用适配
+#
+# MemoryReader.read 已经是 async Contract。
+#
+# 本文件是 [MANUAL KEEP] 真实 Retrieval 脚本，
+# 采用模块级脚本式运行，
+# 这里只把 coroutine 驱动到底。
+# ==================================================
+
+
+def run(coro):
+    """
+    在同步脚本中真实执行并等待
+    async production contract。
+    """
+
+    return asyncio.run(coro)
+
+
+class SyncMemoryReader(MemoryReader):
+    """
+    真实 MemoryReader
+    +
+    同步调用适配。
+    """
+
+    def read(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().read(
+                *args,
+                **kwargs
+            )
+        )
 
 
 # ==================================================
@@ -128,9 +169,14 @@ class FakeJudge:
         candidates: list[MemoryRelevanceCandidate]
 
     这里只适配 Contract，不解释 memory_status。
+
+    注意：
+
+    MemoryReader 现在 await self._judge.judge(...)，
+    因此本 Fake 必须保持 async Calling Contract。
     """
 
-    def judge(
+    async def judge(
         self,
         query,
         candidates
@@ -303,7 +349,7 @@ def print_ranking(
 # ==================================================
 
 
-reader = MemoryReader(
+reader = SyncMemoryReader(
     repository_callable=fake_repository,
     judge=FakeJudge(),
     injector=FakeInjector(),

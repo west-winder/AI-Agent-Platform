@@ -40,8 +40,27 @@ MemoryRelevanceCandidate：
         不加载真实 Reranker
         不写真实 test.db / backend.db
 
-    LLM 通过 MemoryRelevanceJudge(llm_callable=...)
-    注入 Fake。
+    LLM 通过 SyncRelevanceJudge(llm_callable=...)
+    注入 Fake（Sync 只是把 coroutine 驱动到底）。
+
+
+Async Contract 注意事项：
+
+    MemoryRelevanceJudge.judge
+    MemoryReader.read
+
+    已经是 async Contract。
+
+    本模块的 test_ 函数全部保持同步
+    def test_xxx()，由 run() 把 coroutine 驱动到底：
+
+        1. 直接 python 运行时会真的执行
+        2. pytest 会原生收集执行，
+           不会被当成 async test 静默跳过
+        3. coroutine 一定被 await
+        4. 不会产生假 PASS
+
+    本模块不依赖 pytest-asyncio。
 
 
 运行：
@@ -50,6 +69,7 @@ MemoryRelevanceCandidate：
 """
 
 
+import asyncio
 import sys
 import json
 import re
@@ -153,12 +173,96 @@ RETRIEVAL_SOURCE_PATHS = (
 # ============================================================
 
 
+def run(coro):
+    """
+    在同步测试中真实执行并等待
+    async production contract。
+
+    背景：
+
+    MemoryRelevanceJudge.judge / MemoryReader.read
+    已经是 async Contract。
+
+    但本项目当前没有 pytest-asyncio，
+    因此本模块的测试函数保持同步 def test_xxx()：
+
+        1. 直接 python 运行时会真的执行测试
+        2. pytest 会原生收集执行，
+           不会被当成 async test 静默跳过
+        3. coroutine 一定被 await，
+           不会出现 coroutine was never awaited
+        4. 不会产生假 PASS
+
+    这里只负责把 coroutine 驱动到底，
+    不参与任何业务断言。
+    """
+
+    return asyncio.run(coro)
+
+
+class SyncRelevanceJudge(MemoryRelevanceJudge):
+    """
+    真实 MemoryRelevanceJudge
+    +
+    同步调用适配。
+
+    只把 async judge() 的 coroutine
+    驱动到底，不复制、不绕过生产逻辑。
+    """
+
+    def judge(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().judge(
+                *args,
+                **kwargs
+            )
+        )
+
+
+class SyncMemoryReader(MemoryReader):
+    """
+    真实 MemoryReader
+    +
+    同步调用适配。
+
+    只把 async read() 的 coroutine
+    驱动到底，不复制、不绕过生产逻辑。
+    """
+
+    def read(
+        self,
+        *args,
+        **kwargs
+    ):
+        return run(
+            super().read(
+                *args,
+                **kwargs
+            )
+        )
+
+
 class FakeLLM:
     """
     Fake LLM。
 
     捕获 Judge 实际发出的 messages，
     返回预设响应。
+
+    注意：
+
+    MemoryRelevanceJudge 的 llm_callable
+    Contract 已经是 async：
+
+        Callable[[list[dict[str, str]]], Awaitable[str]]
+
+    因此 Fake 必须保持同样的 async
+    Calling Contract，
+    否则 await self._llm_callable(...) 会直接失败。
     """
 
     def __init__(
@@ -170,7 +274,7 @@ class FakeLLM:
         self.call_count = 0
         self.received_messages = None
 
-    def __call__(
+    async def __call__(
         self,
         messages
     ):
@@ -263,7 +367,7 @@ def build_judge(
         response=response
     )
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=fake_llm
     )
 
@@ -682,7 +786,7 @@ def test_rejects_non_list_candidates():
     TypeError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -713,7 +817,7 @@ def test_rejects_non_candidate_element():
     TypeError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -735,7 +839,7 @@ def test_rejects_non_str_content():
     TypeError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -760,7 +864,7 @@ def test_rejects_empty_content():
     ValueError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -785,7 +889,7 @@ def test_rejects_blank_content():
     ValueError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -810,7 +914,7 @@ def test_rejects_non_str_memory_status():
     TypeError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -837,7 +941,7 @@ def test_rejects_illegal_memory_status():
     ValueError
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -868,7 +972,7 @@ def test_empty_candidates_returns_empty_list():
 
     fake_llm = FakeLLM()
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=fake_llm
     )
 
@@ -889,7 +993,7 @@ def test_rejects_invalid_query():
     query 非 str / 空
     """
 
-    judge = MemoryRelevanceJudge(
+    judge = SyncRelevanceJudge(
         llm_callable=FakeLLM()
     )
 
@@ -1403,6 +1507,11 @@ class CapturingJudge:
     Fake Relevance Judge。
 
     捕获 Reader 实际传入的 candidates。
+
+    注意：
+
+    MemoryReader 现在 await self._judge.judge(...)，
+    因此本 Fake 必须保持 async Calling Contract。
     """
 
     def __init__(self):
@@ -1410,7 +1519,7 @@ class CapturingJudge:
         self.received_candidates = None
         self.received_kwargs = None
 
-    def judge(
+    async def judge(
         self,
         query=None,
         candidates=None,
@@ -1439,6 +1548,14 @@ class CapturingJudge:
 
 
 class FakeScopeJudge:
+    """
+    Fake Scope Judge。
+
+    注意：
+
+    MemoryReader 现在 await self._scope_judge.judge(...)，
+    因此本 Fake 必须保持 async Calling Contract。
+    """
 
     def __init__(self):
         self._decision = (
@@ -1449,7 +1566,7 @@ class FakeScopeJudge:
             )
         )
 
-    def judge(
+    async def judge(
         self,
         query
     ):
@@ -1578,7 +1695,7 @@ def build_reader_with_capturing_judge(
         CapturingJudge()
     )
 
-    reader = MemoryReader(
+    reader = SyncMemoryReader(
         repository_callable=(
             FakeRepository(
                 memories

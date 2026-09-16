@@ -319,7 +319,7 @@ memory_id 必须对应输入 Existing Memory
     # Judge
     # ==================================================
 
-    def judge(
+    async def judge(
         self,
         candidate: MemoryCandidate,
         existing_memories: list
@@ -436,7 +436,7 @@ Existing Memories:
 
         try:
 
-            response = call_llm(
+            response = await call_llm(
                 messages
             )
 

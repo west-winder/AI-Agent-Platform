@@ -42,7 +42,7 @@ class MemoryExtractor:
     # Memory Extraction
     # ==================================================
 
-    def extract(
+    async def extract(
         self,
         user_message: str
     ) -> list[MemoryCandidate]:
@@ -245,7 +245,7 @@ Memory 不只保存“永远不变”的信息。
         # 调用LLM
         # ==================================================
 
-        response = call_llm(
+        response = await call_llm(
             [
                 {
                     "role": "system",
