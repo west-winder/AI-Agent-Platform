@@ -9,8 +9,13 @@ from backend.schemas.chat import (
 )
 
 from backend.services.chat_service import (
-    chat
+    chat,
+    stream_chat
 )
+
+import json
+
+from fastapi.responses import StreamingResponse
 
 
 router = APIRouter(
@@ -45,3 +50,31 @@ async def chat_endpoint(
             status_code=404,
             detail=str(e)
         )
+
+
+@router.post(
+    "/stream"
+)
+async def stream_chat_endpoint(
+    request : ChatRequest,
+    db: Session = Depends(get_db)
+):
+    async def event_stream():
+        async for chunk in stream_chat(
+            db=db,
+            conversation_id=request.conversation_id,
+            user_message=request.content
+        ):
+            payload = json.dumps(
+                {
+                    "delta": chunk
+                },
+                ensure_ascii=False,
+            )
+            yield f"data: {payload}\n\n"
+
+    response = StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream"
+    )
+    return response

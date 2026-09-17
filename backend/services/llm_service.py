@@ -3,7 +3,7 @@ from typing import List, Dict, Optional
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-
+from collections.abc import AsyncIterator
 
 # 加载.env文件
 load_dotenv()
@@ -70,3 +70,34 @@ async def call_llm(
         messages,
         model
     )
+
+
+async def stream_chat_completion(
+    messages: List[Dict[str,str]],
+    model: str | None = None,
+) -> AsyncIterator[str]:
+
+    actual_model = model or os.getenv("DEFAULT_MODEL")
+
+    stream = await client.chat.completions.create(
+        model=actual_model,
+        messages=messages,
+        stream=True
+    )
+
+    async for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
+
+
+async def stream_llm(
+    messages: List[Dict[str, str]],
+    model: str | None = None,
+) -> AsyncIterator[str]:
+
+    async for chunk in stream_chat_completion(
+        messages = messages,
+        model = model
+    ):
+            yield chunk

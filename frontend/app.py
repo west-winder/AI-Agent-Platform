@@ -1,3 +1,5 @@
+import json
+
 import gradio as gr
 import requests
 
@@ -254,51 +256,139 @@ def load_messages(title, conversation_map):
 # Chat
 # ==================================================
 
-def chat(message, history, conversation_id):
+def chat(message, history, conversation_id, stream_enabled=True):
     """
     发送一条用户消息。
 
-    返回值必须与 load_messages()
-    使用同一个 Gradio messages Contract，
+    这是一个 Generator Function。
+
+    因为 Streaming 分支必须使用 yield，
+    而一旦函数体内出现 yield，
+    整个函数就变成 Generator Contract，
+    所以 Non-Streaming 分支也必须 yield，
+    不能使用 return 作为 Gradio 输出。
+
+    两个分支的输出 Contract 完全一致：
+
+        (gradio_messages, "")
+
+    gradio_messages 与 load_messages() 使用同一个
+    Gradio messages Contract，
     不能混用 tuple / list pair 格式。
     """
 
     gradio_messages = to_gradio_messages(history)
 
+    # --------------------------------------------------
+    # 1. conversation_id 检查
+    # --------------------------------------------------
+
     if conversation_id is None:
+
         gradio_messages.append(
             {
                 "role": "assistant",
                 "content": "请先创建聊天",
             }
         )
-        return gradio_messages, ""
 
-    response = requests.post(
-        f"{BASE_URL}/chat",
-        json={
-            "conversation_id": conversation_id,
-            "content": message,
-        },
-    )
+        yield gradio_messages, ""
 
-    if response.status_code != 200:
+        return
+
+    # --------------------------------------------------
+    # 2. 空消息直接忽略
+    #
+    # 否则会把 content=None 写进 Chatbot messages，
+    # 破坏 messages Contract。
+    # --------------------------------------------------
+
+    if not message:
+
+        yield gradio_messages, ""
+
+        return
+
+    # --------------------------------------------------
+    # 3. Non-Streaming 分支
+    #
+    # stream_enabled == False 时：
+    #
+    #   POST /chat
+    #   → response.json()["answer"]
+    #   → 一次性展示完整 Assistant Message
+    #
+    # 只 yield 一次，UI 表现与旧版本一致。
+    # --------------------------------------------------
+
+    if not stream_enabled:
+
+        response = None
+
+        try:
+
+            response = requests.post(
+                f"{BASE_URL}/chat",
+                json={
+                    "conversation_id": conversation_id,
+                    "content": message,
+                },
+            )
+
+        except requests.RequestException:
+
+            response = None
+
+        if response is None or response.status_code != 200:
+
+            gradio_messages.append(
+                {
+                    "role": "user",
+                    "content": message,
+                }
+            )
+            gradio_messages.append(
+                {
+                    "role": "assistant",
+                    "content": "请求失败",
+                }
+            )
+
+            yield gradio_messages, ""
+
+            return
+
+        data = response.json()
+        answer = data["answer"]
+
         gradio_messages.append(
             {
                 "role": "user",
                 "content": message,
             }
         )
+
         gradio_messages.append(
             {
                 "role": "assistant",
-                "content": "请求失败",
+                "content": answer,
             }
         )
-        return gradio_messages, ""
 
-    data = response.json()
-    answer = data["answer"]
+        yield gradio_messages, ""
+
+        return
+
+    # --------------------------------------------------
+    # 4. Streaming 分支
+    #
+    # stream_enabled == True 时：
+    #
+    #   POST /chat/stream
+    #   → SSE
+    #   → 每收到 data: {"delta": "..."}
+    #   → 更新“同一个”Assistant Message
+    # --------------------------------------------------
 
     gradio_messages.append(
         {
@@ -310,11 +400,115 @@ def chat(message, history, conversation_id):
     gradio_messages.append(
         {
             "role": "assistant",
-            "content": answer,
+            "content": "",
         }
     )
 
-    return gradio_messages, ""
+    # 先 yield 一次：
+    # 让 User Message 与空 Assistant Message 立即出现在页面上。
+    yield gradio_messages, ""
+
+    assistant_text = ""
+
+    try:
+
+        with requests.post(
+            f"{BASE_URL}/chat/stream",
+            json={
+                "conversation_id": conversation_id,
+                "content": message,
+            },
+            headers={
+                "Accept": "text/event-stream",
+            },
+            stream=True,
+        ) as response:
+
+            if response.status_code != 200:
+
+                gradio_messages[-1]["content"] = "请求失败"
+
+                yield gradio_messages, ""
+
+                return
+
+            # decode_unicode=False：
+            # 自己按 UTF-8 解码，
+            # 不依赖 requests 从 Content-Type 推断编码，
+            # 保证中文不乱码。
+            for raw_line in response.iter_lines(decode_unicode=False):
+
+                # SSE 事件之间用空行分隔，
+                # 空行不是正文，直接跳过。
+                if not raw_line:
+                    continue
+
+                line = raw_line.decode("utf-8", errors="replace")
+
+                # 只处理 data: 行
+                if not line.startswith("data:"):
+                    continue
+
+                payload = line[len("data:"):].strip()
+
+                if not payload:
+                    continue
+
+                # 当前 data 内容是 JSON：{"delta": "..."}
+                try:
+
+                    chunk_data = json.loads(payload)
+
+                except json.JSONDecodeError:
+
+                    # 单个 chunk 解析失败不中断整条流
+                    continue
+
+                delta = chunk_data.get("delta")
+
+                if not isinstance(delta, str) or not delta:
+                    continue
+
+                assistant_text += delta
+
+                # 始终更新最后一个 Assistant Message，
+                # 绝不 append 新的 assistant message。
+                gradio_messages[-1]["content"] = assistant_text
+
+                yield gradio_messages, ""
+
+    except requests.RequestException:
+
+        # Streaming 中途失败：
+        # 保留已收到的内容，追加中断提示，
+        # 不让整个 Gradio 页面崩掉。
+        if assistant_text:
+
+            gradio_messages[-1]["content"] = (
+                f"{assistant_text}\n\n[流式请求中断]"
+            )
+
+        else:
+
+            gradio_messages[-1]["content"] = "流式请求中断"
+
+        yield gradio_messages, ""
+
+        return
+
+    # --------------------------------------------------
+    # 5. Streaming 结束兜底
+    #
+    # 如果整条流没有任何有效 delta，
+    # 空 Assistant Message 会被替换成提示文案，
+    # 避免留下一个永远为空的 Assistant 气泡。
+    # --------------------------------------------------
+
+    if not assistant_text:
+
+        gradio_messages[-1]["content"] = "（无内容返回）"
+
+        yield gradio_messages, ""
 
 
 # ==================================================
@@ -571,7 +765,13 @@ with gr.Blocks() as demo:
                         ],
                     )
                     message = gr.Textbox(label="输入消息")
-                    send_btn = gr.Button("发送", variant="primary")
+
+                    with gr.Row():
+                        stream_enabled = gr.Checkbox(
+                            label="流式输出",
+                            value=True,
+                        )
+                        send_btn = gr.Button("发送", variant="primary")
 
     # Agent管理事件
     agent_manage_select.change(
@@ -636,7 +836,7 @@ with gr.Blocks() as demo:
     # 发送消息
     send_btn.click(
         fn=chat,
-        inputs=[message, chatbot, conversation_id],
+        inputs=[message, chatbot, conversation_id, stream_enabled],
         outputs=[chatbot, message],
     )
 
