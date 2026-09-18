@@ -1,7 +1,94 @@
-import json
+from typing import Any
+
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 from backend.schemas.memory_candidate import MemoryCandidate
-from backend.services.llm_service import call_llm
+from backend.services.llm_service import call_llm_structured
+
+
+# ==================================================
+# Memory Extractor LLM Boundary Contract
+# ==================================================
+
+
+class MemoryExtractorLLMItem(BaseModel):
+    """
+    单条 LLM Memory Extraction 输出。
+
+    注意：
+
+    这里故意不把 content / memory_type
+    直接约束成 StrictStr / Literal。
+
+    原实现的 Contract 是：
+
+    - 单条 content 非 str / 为空 → 跳过该条
+    - 单条 memory_type 非法 → 跳过该条
+    - 其他合法条目仍然保留
+
+    如果这里把字段直接写成严格类型，
+    任意一条非法 item 都可能导致整份 Structured Output
+    Validation 失败，从而把其他合法 Memory 一并丢弃。
+
+    因此这里先接收字段，
+    再由 MemoryExtractor 按旧 Business Contract
+    逐条过滤。
+    """
+
+    content: Any = None
+    memory_type: Any = None
+
+
+class MemoryExtractorLLMOutput(BaseModel):
+    """
+    MemoryExtractor 的 Structured Output 顶层结构。
+
+    memories 缺失时保持旧行为：
+    等价于空列表。
+
+    非 object item：
+    旧实现会 continue 跳过，
+    因此在进入子 Model 前先过滤掉，
+    避免一条坏 item 让整批输出失败。
+    """
+
+    memories: list[
+        MemoryExtractorLLMItem
+    ] = Field(default_factory=list)
+
+    @field_validator(
+        "memories",
+        mode="before",
+    )
+    @classmethod
+    def preserve_per_item_skip_contract(
+        cls,
+        value,
+    ):
+        if value is None:
+            return []
+
+        if not isinstance(value, list):
+            raise ValueError(
+                "memories 必须是 list"
+            )
+
+        return [
+            item
+            for item in value
+            if isinstance(
+                item,
+                (
+                    dict,
+                    MemoryExtractorLLMItem,
+                ),
+            )
+        ]
 
 
 class MemoryExtractor:
@@ -51,6 +138,18 @@ class MemoryExtractor:
 
         如果没有值得长期保存的信息，
         返回空列表。
+
+        Structured Output 迁移只替换：
+
+        call_llm()
+            ↓
+        str
+            ↓
+        json.loads()
+
+        顶层结构改由 Pydantic 负责。
+
+        原来的逐条 skip Business Contract 保持不变。
         """
 
         system_prompt = """
@@ -216,106 +315,82 @@ Memory 不只保存“永远不变”的信息。
    但状态终止、状态变化、状态转移、状态重启
    属于有效信息，必须保存。
 
-5. 如果没有值得保存的信息，返回空数组。
-
-6. 必须严格返回JSON。
-
-7. 不要输出JSON之外的任何内容。
+5. 如果没有值得保存的信息，
+   memories 必须为空列表。
 
 
-返回格式：
+==================================================
+五、输出语义要求
+==================================================
 
-{
-    "memories": [
-        {
-            "content": "用户正在学习FastAPI",
-            "memory_type": "fact"
-        }
-    ]
-}
+每条 Memory 都必须包含：
 
-如果没有值得保存的信息：
+content
 
-{
-    "memories": []
-}
+表示要保存的用户长期 Memory 内容。
+
+
+memory_type
+
+表示该 Memory 的类型，
+只能使用：
+
+fact
+preference
+goal
+profile
+
+
+输出结构由系统提供的
+Structured Output Schema 约束。
 """
 
         # ==================================================
-        # 调用LLM
+        # 调用 Structured Output LLM
         # ==================================================
 
-        response = await call_llm(
-            [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_message
-                }
-            ]
-        )
-
-        # ==================================================
-        # LLM没有返回内容
-        # ==================================================
-
-        if not response:
-            return []
-
-        # ==================================================
-        # JSON解析
-        # ==================================================
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": user_message
+            }
+        ]
 
         try:
+            llm_output = await call_llm_structured(
+                messages=messages,
+                output_model=MemoryExtractorLLMOutput,
+            )
 
-            data = json.loads(response)
-
-        except json.JSONDecodeError:
-
-            # 当前阶段：
-            # 如果LLM没有返回合法JSON，
-            # 则认为本次没有提取到Memory。
+        except (ValidationError, ValueError):
+            # 保持旧的 fail-closed 语义：
+            #
+            # - LLM 没有有效结构化结果
+            # - 顶层结构不合法
+            # - memories 不是 list
+            #
+            # 都视为本次没有提取到 Memory。
             return []
 
         # ==================================================
-        # 获取Memory列表
-        # ==================================================
-
-        memories = data.get(
-            "memories",
-            []
-        )
-
-        if not isinstance(
-            memories,
-            list
-        ):
-            return []
-
-        # ==================================================
-        # 构造Candidate
+        # 构造 Candidate
+        #
+        # 这里故意保留逐条 skip：
+        #
+        # 某一条 item 非法
+        # 不影响同一批次其他合法 Memory。
         # ==================================================
 
         candidates = []
 
-        for memory in memories:
+        for memory in llm_output.memories:
 
-            if not isinstance(
-                memory,
-                dict
-            ):
-                continue
-
-            content = memory.get(
-                "content"
-            )
-
-            memory_type = memory.get(
-                "memory_type"
-            )
+            content = memory.content
+            memory_type = memory.memory_type
 
             # ----------------------------------------------
             # content校验

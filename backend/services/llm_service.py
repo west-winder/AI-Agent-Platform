@@ -1,5 +1,5 @@
-from typing import List, Dict, Optional
-
+from typing import List, Dict, Optional, TypeVar
+from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -13,6 +13,11 @@ load_dotenv()
 client = AsyncOpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url=os.getenv("DEEPSEEK_BASE_URL")
+)
+
+StructuredOutputT = TypeVar(
+    "StructuredOutputT",
+    bound=BaseModel,
 )
 
 
@@ -40,7 +45,7 @@ async def chat_completion(
     if model is None:
         model = os.getenv(
             "DEFAULT_MODEL",
-            "deepseek-v4-flash"
+            "deepseek-flash"
         )
 
 
@@ -101,3 +106,44 @@ async def stream_llm(
         model = model
     ):
             yield chunk
+
+
+async def structured_completion(
+    messages: List[Dict[str,str]],
+    output_model: type[StructuredOutputT],
+    model: Optional[str] = None,
+) -> StructuredOutputT:
+    
+    actual_model = model or os.getenv(
+        "DEFAULT_MODEL",
+        "deepseek-flash"
+    )
+
+    response = await client.responses.parse(
+        model=actual_model,
+        input=messages,
+        text_format=output_model,
+    )
+
+    parsed = response.output_parsed
+
+    if parsed is None:
+        raise ValueError(
+            "LLM structured output 没有返回可解析结果"
+        )
+
+    return parsed
+
+
+
+async def call_llm_structured(
+    messages: List[Dict[str, str]],
+    output_model: type[StructuredOutputT],
+    model: Optional[str] = None,
+) -> StructuredOutputT:
+
+    return await structured_completion(
+        messages=messages,
+        output_model=output_model,
+        model=model,
+    )

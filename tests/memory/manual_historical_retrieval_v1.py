@@ -92,7 +92,7 @@ from backend.memory.memory_read.memory_injector import (  # noqa: E402
 import backend.memory.memory_read.memory_query_scope_judge as scope_judge_module  # noqa: E402
 
 from backend.services.llm_service import (  # noqa: E402
-    call_llm as real_call_llm,
+    call_llm_structured as real_call_llm_structured,
 )
 
 
@@ -295,37 +295,47 @@ class RecordingScopeLLM:
     纯 Pass-through。
 
     记录 Scope Judge 是否真的调用了 LLM，
-    然后原样调用真实 call_llm。
+    然后原样调用真实 call_llm_structured。
 
     注意：
 
-    MemoryQueryScopeJudge 现在
-    await call_llm(messages)，
+    MemoryQueryScopeJudge 现在：
 
-    真实 call_llm 也已经是 async，
+        await call_llm_structured(
+            messages=...,
+            output_model=MemoryQueryScopeLLMOutput,
+        )
+
     因此本 Recorder 必须保持同样的
-    async Calling Contract，
-    并且 await 真实调用。
+    keyword-only Calling Contract，
+    并且原样透传 output_model，
+    由真实 structured_completion 完成
+    Provider 侧解析与校验。
     """
 
     def __init__(
         self,
-        real_call_llm
+        real_call_llm_structured
     ):
-        self._real_call_llm = (
-            real_call_llm
+        self._real_call_llm_structured = (
+            real_call_llm_structured
         )
 
         self.call_count = 0
 
     async def __call__(
         self,
-        messages
+        *,
+        messages,
+        output_model,
+        model=None
     ):
         self.call_count += 1
 
-        return await self._real_call_llm(
-            messages
+        return await self._real_call_llm_structured(
+            messages=messages,
+            output_model=output_model,
+            model=model,
         )
 
 
@@ -548,11 +558,11 @@ def main():
 
     scope_llm_recorder = (
         RecordingScopeLLM(
-            real_call_llm
+            real_call_llm_structured
         )
     )
 
-    scope_judge_module.call_llm = (
+    scope_judge_module.call_llm_structured = (
         scope_llm_recorder
     )
 
@@ -768,8 +778,8 @@ def main():
 
         db.close()
 
-        scope_judge_module.call_llm = (
-            real_call_llm
+        scope_judge_module.call_llm_structured = (
+            real_call_llm_structured
         )
 
     # --------------------------------------------------------

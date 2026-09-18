@@ -26,6 +26,42 @@ Historical Memory Retrieval - Deterministic [KEEP] Tests
             ↓
         Memory Context
 
+Component Responsibility（本文件只测 Judge 真正负责的部分）：
+
+    Layer 2 已经迁移为 Structured Output：
+
+        call_llm_structured(
+            messages=...,
+            output_model=MemoryQueryScopeLLMOutput,
+        )
+        → MemoryQueryScopeLLMOutput
+        → MemoryQueryScopeDecision
+
+    因此 Judge 不再负责：
+
+        raw str 类型检查
+        empty / blank response 判定
+        json.loads 语法解析
+        JSON dict shape 校验
+        scope 提取与 allowed scope 校验
+
+    上面这些属于 Provider / SDK / Pydantic Boundary：
+
+        MemoryQueryScopeLLMOutput      → scope / reason 校验（见
+                                         test_memory_query_scope_
+                                         structured_output.py）
+        llm_service.structured_completion
+                                       → output_parsed is None 时 raise
+
+    Judge 仍然负责：
+
+        第一层词法规则
+        何时下传 LLM
+        source = rule / llm / fallback
+        Structured 调用抛异常 → fallback current
+        合法 scope + 缺失/空白 reason → 不丢 scope
+        query 输入校验
+
 设计约束：
 
     deterministic
@@ -72,7 +108,6 @@ Async Contract 注意事项：
 
 import asyncio
 import sys
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
@@ -94,6 +129,7 @@ if str(PROJECT_ROOT) not in sys.path:
     )
 
 
+from pydantic import ValidationError  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
@@ -132,6 +168,7 @@ import backend.memory.memory_read.memory_query_scope_judge as scope_judge_module
 
 from backend.memory.memory_read.memory_query_scope_judge import (  # noqa: E402
     MemoryQueryScopeJudge,
+    MemoryQueryScopeLLMOutput,
 )
 
 from backend.memory.memory_read.memory_repository import (  # noqa: E402
@@ -311,70 +348,103 @@ class SyncMemoryReader(MemoryReader):
         )
 
 
-class FakeLLM:
+class FakeScopeStructuredLLM:
     """
-    Fake call_llm。
+    Fake call_llm_structured。
 
-    记录自己被调用的次数与收到的 messages，
-    返回预设响应或抛出预设异常。
+    记录自己被调用的次数、收到的 messages
+    与 output_model，返回预设 Structured
+    Output 或抛出预设异常。
 
-    注意：
+    生产 Contract（MemoryQueryScopeJudge
+    ._judge_by_llm）：
 
-    MemoryQueryScopeJudge 现在
-    await call_llm(messages)，
+        await call_llm_structured(
+            messages=messages,
+            output_model=MemoryQueryScopeLLMOutput,
+        )
+        → MemoryQueryScopeLLMOutput
 
     因此本 Fake 必须保持同样的
-    async Calling Contract。
+    keyword-only Calling Contract，
+    并且返回 Structured Output Model，
+    而不是旧实现里的 JSON str。
     """
 
     def __init__(
         self,
-        response=None,
+        output=None,
         exc=None
     ):
-        self._response = response
+        self._output = output
         self._exc = exc
 
         self.call_count = 0
         self.received_messages = None
+        self.received_output_model = None
+        self.received_model = None
 
     async def __call__(
         self,
-        messages
+        *,
+        messages,
+        output_model,
+        model=None
     ):
         self.call_count += 1
 
         self.received_messages = messages
+        self.received_output_model = output_model
+        self.received_model = model
+
+        assert (
+            output_model
+            is MemoryQueryScopeLLMOutput
+        ), (
+            "Scope Judge 必须以 "
+            "MemoryQueryScopeLLMOutput "
+            "作为 output_model，"
+            f"实际为：{output_model}"
+        )
 
         if self._exc is not None:
             raise self._exc
 
-        return self._response
+        return self._output
 
 
-def patch_call_llm(fake_llm):
+def patch_scope_llm(fake_llm):
     """
-    将 Scope Judge 模块中的 call_llm
-    替换为 Fake。
+    将 Scope Judge 模块中的
+    call_llm_structured 替换为 Fake。
+
+    注意：
+    patch 目标必须与生产模块
+    真实 import 的符号一致。
     """
 
     return mock.patch.object(
         scope_judge_module,
-        "call_llm",
+        "call_llm_structured",
         fake_llm
     )
 
 
-def llm_json(
+def scope_output(
     scope,
     reason="fake llm reason"
 ):
-    return json.dumps(
-        {
-            "scope": scope,
-            "reason": reason,
-        },
-        ensure_ascii=False
+    """
+    构造 Structured Output。
+
+    reason 传 None / 空白 时不会在
+    这里预处理，原样交给 Pydantic Model，
+    用于验证 Judge 的 Reason Contract。
+    """
+
+    return MemoryQueryScopeLLMOutput(
+        scope=scope,
+        reason=reason
     )
 
 
@@ -515,17 +585,17 @@ def test_rule_layer_historical_query():
         scope  = historical
         source = rule
 
-    且 call_llm 不应被调用。
+    且 call_llm_structured 不应被调用。
     """
 
-    fake_llm = FakeLLM(
-        response=llm_json(
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output(
             "current",
             "should not be used"
         )
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -560,11 +630,11 @@ def test_rule_layer_current_query():
     LLM 不调用。
     """
 
-    fake_llm = FakeLLM(
-        response=llm_json("historical")
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output("historical")
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -599,11 +669,11 @@ def test_rule_layer_both_query():
     LLM 不调用。
     """
 
-    fake_llm = FakeLLM(
-        response=llm_json("historical")
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output("historical")
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -641,14 +711,14 @@ def test_rule_layer_defers_mixed_markers_to_llm():
         source = llm
     """
 
-    fake_llm = FakeLLM(
-        response=llm_json(
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output(
             "historical",
             "用户真正询问的是过去状态"
         )
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -687,14 +757,14 @@ def test_rule_layer_defers_no_marker_query_to_llm():
         source = llm
     """
 
-    fake_llm = FakeLLM(
-        response=llm_json(
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output(
             "both",
             "需要对比过去与当前技术方向"
         )
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -725,11 +795,11 @@ def test_rule_layer_defers_no_marker_query_to_llm():
 
 
 def test_llm_layer_scope_current():
-    fake_llm = FakeLLM(
-        response=llm_json("current")
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output("current")
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -746,11 +816,11 @@ def test_llm_layer_scope_current():
 
 
 def test_llm_layer_scope_historical():
-    fake_llm = FakeLLM(
-        response=llm_json("historical")
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output("historical")
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -767,11 +837,11 @@ def test_llm_layer_scope_historical():
 
 
 def test_llm_layer_scope_both():
-    fake_llm = FakeLLM(
-        response=llm_json("both")
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output("both")
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -787,135 +857,117 @@ def test_llm_layer_scope_both():
     )
 
 
-def test_llm_layer_scope_is_normalized():
+def test_llm_layer_reason_compatibility():
     """
-    LLM 返回带大小写 / 空白的合法 scope，
-    应该被规范化后接受。
-    """
-
-    fake_llm = FakeLLM(
-        response=llm_json("  HISTORICAL  ")
-    )
-
-    with patch_call_llm(fake_llm):
-
-        decision = (
-            SyncQueryScopeJudge()
-            .judge(
-                "我的技术栈经历过什么？"
-            )
-        )
-
-    assert_scope_decision(
-        decision,
-        MEMORY_QUERY_SCOPE_HISTORICAL,
-        "llm"
-    )
-
-
-def test_llm_layer_scope_kept_when_reason_missing():
-    """
-    scope 合法
-    但 reason 缺失
-
+    scope 合法但 reason 缺失 / 空白，
     不应该丢弃合法 scope。
 
-    例如：
+    当前架构下：
 
-        {"scope": "historical"}
+        reason = None
+        reason = ""
+        reason = "   \n\t  "
+
+    会在 Pydantic Model 层收敛成
+    同一个 reason = None，
+    再由 Judge 补默认 reason。
+
+    也就是说这里是**同一条 Judge 行为路径**。
+
+    因此只保留一个 Test，
+    不再拆成三个名字不同、
+    实际走同一路径的同义 Case。
 
     预期：
 
-        scope  = historical
+        scope  = 合法 scope 原样保留
         source = llm
-        reason 自动补默认说明
+        reason = 默认说明
     """
 
-    fake_llm = FakeLLM(
-        response=json.dumps(
-            {
-                "scope": "historical"
-            }
-        )
-    )
+    for reason in (
+        None,
+        "",
+        "   \n\t  ",
+    ):
 
-    with patch_call_llm(fake_llm):
-
-        decision = (
-            SyncQueryScopeJudge()
-            .judge(
-                "我的技术栈经历过什么？"
+        fake_llm = FakeScopeStructuredLLM(
+            output=scope_output(
+                "historical",
+                reason
             )
         )
 
-    assert_scope_decision(
-        decision,
-        MEMORY_QUERY_SCOPE_HISTORICAL,
-        "llm"
-    )
+        with patch_scope_llm(fake_llm):
 
-    assert "reason" in decision.reason, (
-        "reason 缺失时应该自动补充默认说明，"
-        f"实际为：{decision.reason}"
-    )
-
-
-def test_llm_layer_scope_kept_when_reason_blank():
-    """
-    scope 合法
-    但 reason 为空字符串 / 空白
-
-    不应该丢弃合法 scope。
-    """
-
-    fake_llm = FakeLLM(
-        response=json.dumps(
-            {
-                "scope": "both",
-                "reason": "   ",
-            }
-        )
-    )
-
-    with patch_call_llm(fake_llm):
-
-        decision = (
-            SyncQueryScopeJudge()
-            .judge(
-                "我的技术栈经历过什么？"
+            decision = (
+                SyncQueryScopeJudge()
+                .judge(
+                    "我的技术栈经历过什么？"
+                )
             )
+
+        assert_scope_decision(
+            decision,
+            MEMORY_QUERY_SCOPE_HISTORICAL,
+            "llm"
         )
 
-    assert_scope_decision(
-        decision,
-        MEMORY_QUERY_SCOPE_BOTH,
-        "llm"
-    )
+        assert decision.reason == (
+            "LLM 返回了合法 scope，"
+            "但没有提供有效 reason"
+        ), (
+            f"reason={reason!r} 时"
+            "应该补充默认说明，"
+            f"实际为：{decision.reason}"
+        )
 
 
 # ============================================================
 # ============================================================
 # Section 3
-# Scope Judge - Layer 2 Failure Contract
+# Scope Judge - Layer 2 Structured Failure Contract
 #
 # 所有失败：
 #
 #     scope  = current
 #     source = fallback
+#
+# 只保留 Judge 真正负责的一条路径：
+#
+#     call_llm_structured 抛异常
+#         ↓
+#     fallback current
+#
+# raw str / JSON 形态判定不再是
+# Judge 的职责，已随 Structured
+# Output 迁移交给 Provider /
+# SDK / Pydantic Boundary。
 # ============================================================
 # ============================================================
 
 
-def assert_fallback_current(
-    response=None,
-    exc=None
+def assert_structured_failure_falls_back(
+    exc
 ):
-    fake_llm = FakeLLM(
-        response=response,
+    """
+    用真实 Judge 验证：
+
+        call_llm_structured 抛出异常
+            ↓
+        scope  = current
+        source = fallback
+        reason 必须保留真实错误类型
+
+    返回 Fake，便于调用方继续断言
+    "失败路径也确实调用过一次 Provider"。
+    """
+
+    fake_llm = FakeScopeStructuredLLM(
         exc=exc
     )
 
-    with patch_call_llm(fake_llm):
+    with patch_scope_llm(fake_llm):
 
         decision = (
             SyncQueryScopeJudge()
@@ -930,97 +982,117 @@ def assert_fallback_current(
         "fallback"
     )
 
-
-def test_llm_fallback_on_empty_response():
-    """
-    LLM 返回空字符串。
-    """
-
-    assert_fallback_current(
-        response=""
+    assert type(exc).__name__ in decision.reason, (
+        "fallback reason 必须保留真实错误类型，"
+        f"期望包含 {type(exc).__name__}，"
+        f"实际为：{decision.reason}"
     )
 
+    return fake_llm
 
-def test_llm_fallback_on_blank_response():
+
+def build_real_invalid_scope_error():
     """
-    LLM 返回全空白内容。
-    """
+    真实构造一个 ValidationError：
 
-    assert_fallback_current(
-        response="   \n\t  "
-    )
+        MemoryQueryScopeLLMOutput(scope="past")
 
-
-def test_llm_fallback_on_none_response():
-    """
-    LLM 返回 None。
+    这正是 Provider 返回非法 scope 时，
+    Structured Output 校验层向上抛出的
+    异常类型。
     """
 
-    assert_fallback_current(
-        response=None
-    )
+    try:
 
-
-def test_llm_fallback_on_non_string_response():
-    """
-    LLM 返回非字符串对象。
-    """
-
-    assert_fallback_current(
-        response=123
-    )
-
-
-def test_llm_fallback_on_invalid_json():
-    """
-    LLM 返回非法 JSON。
-    """
-
-    assert_fallback_current(
-        response="这不是 JSON"
-    )
-
-
-def test_llm_fallback_on_non_object_json():
-    """
-    LLM 返回的 JSON 不是 object。
-    """
-
-    assert_fallback_current(
-        response='["historical"]'
-    )
-
-
-def test_llm_fallback_on_missing_scope():
-    """
-    JSON object 中 scope 缺失。
-    """
-
-    assert_fallback_current(
-        response='{"reason": "忘了写 scope"}'
-    )
-
-
-def test_llm_fallback_on_illegal_scope():
-    """
-    scope 非法，例如 past。
-    """
-
-    assert_fallback_current(
-        response=llm_json("past")
-    )
-
-
-def test_llm_fallback_on_exception():
-    """
-    call_llm 抛出异常。
-    """
-
-    assert_fallback_current(
-        exc=RuntimeError(
-            "DeepSeek unavailable"
+        MemoryQueryScopeLLMOutput(
+            scope="past"
         )
+
+    except ValidationError as exc:
+
+        return exc
+
+    raise AssertionError(
+        "MemoryQueryScopeLLMOutput "
+        "应该拒绝 scope='past'"
     )
+
+
+def test_llm_fallback_on_structured_call_failure():
+    """
+    Structured LLM 调用失败
+        ↓
+    Judge 必须降级为 current。
+
+    当前架构下 Judge 只负责：
+
+        任何从 call_llm_structured 冒出来的异常
+            ↓
+        fallback current
+
+    因此这里用三种真实存在的异常来源，
+    走**同一条 Judge 路径**：
+
+        1. Provider / 网络层失败
+           RuntimeError
+
+        2. llm_service.structured_completion
+           在 output_parsed is None 时
+           raise ValueError
+
+        3. Provider 返回非法 scope
+           → Pydantic ValidationError
+
+    旧实现里的：
+
+        empty_response
+        blank_response
+        none_response
+        non_string_response
+        invalid_json
+        non_object_json
+        missing_scope
+        illegal_scope
+
+    已经**不属于 Judge 责任**：
+
+        raw str / JSON 形态判定发生在
+        Judge 之前，现在由
+        Provider / SDK / Pydantic Boundary 承担。
+        Judge 拿到的永远是
+        MemoryQueryScopeLLMOutput。
+
+    所以这里合并为一个 Test，
+    不再保留 9 个名字不同、
+    实际走同一路径的 Case。
+
+    同时断言 reason 里保留了真实错误类型，
+    保证不同失败原因不会在 Trace 里糊成一团。
+    """
+
+    exceptions = (
+        RuntimeError(
+            "DeepSeek unavailable"
+        ),
+        ValueError(
+            "LLM structured output "
+            "没有返回可解析结果"
+        ),
+        build_real_invalid_scope_error(),
+    )
+
+    for exc in exceptions:
+
+        fake_llm = (
+            assert_structured_failure_falls_back(
+                exc
+            )
+        )
+
+        assert fake_llm.call_count == 1, (
+            "失败路径也必须真实调用过一次 "
+            "call_llm_structured"
+        )
 
 
 # ============================================================
@@ -1040,8 +1112,8 @@ def test_judge_rejects_non_string_query():
 
     judge = SyncQueryScopeJudge()
 
-    fake_llm = FakeLLM(
-        response=llm_json("current")
+    fake_llm = FakeScopeStructuredLLM(
+        output=scope_output("current")
     )
 
     for bad_query in (
@@ -1051,7 +1123,7 @@ def test_judge_rejects_non_string_query():
         {"query": "我以前学什么"},
     ):
 
-        with patch_call_llm(fake_llm):
+        with patch_scope_llm(fake_llm):
 
             try:
 

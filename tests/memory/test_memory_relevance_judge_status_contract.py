@@ -26,9 +26,49 @@ MemoryRelevanceCandidate：
     2. Current Status Preservation
     3. Prompt Semantic Contract
     4. Input Contract
-    5. Reader → Relevance Judge
-    6. Existing Output / Coverage Contract
-    7. Architecture Boundary
+    5. LLM Boundary Model Contract
+    6. Output / Coverage Contract
+    7. Reader → Relevance Judge
+    8. Architecture Boundary
+
+
+Component Responsibility（Structured Output 迁移之后）：
+
+    MemoryRelevanceJudge 的 llm_callable 已经是：
+
+        await llm_callable(
+            messages=...,
+            output_model=MemoryRelevanceLLMOutput,
+        )
+        → MemoryRelevanceLLMOutput
+
+    因此 Judge **不再负责**：
+
+        response 是否 str
+        空字符串 / 空白字符串
+        Markdown code fence
+        json.loads 语法解析
+        JSON 顶层是否 object
+        decisions 是否 list
+        index 类型
+        selected 类型
+        reason 类型 / 非空
+
+    上面这些由 Provider / SDK / Pydantic Boundary 承担，
+    本文件用 "LLM Boundary Model Contract" 分节直接测
+    MemoryRelevanceLLMDecision / MemoryRelevanceLLMOutput。
+
+    Judge 继续负责**运行时**才能确定的业务关系：
+
+        decision 数量 == candidate 数量
+        index 在本次 candidate 范围内
+        index 不重复
+        完整覆盖所有 candidate
+        Strict Model → JudgeDecision 转换
+        candidates=[] → []，且不调用 LLM
+        Structured LLM / Pydantic 异常原样向上抛
+        （Failure Policy 没有 fallback）
+        最终结果按 index 排序
 
 
 设计约束：
@@ -89,9 +129,13 @@ if str(PROJECT_ROOT) not in sys.path:
     )
 
 
+from pydantic import ValidationError  # noqa: E402
+
 from backend.memory.memory_read.memory_relevance_judge import (  # noqa: E402
     MemoryRelevanceCandidate,
     MemoryRelevanceJudge,
+    MemoryRelevanceLLMDecision,
+    MemoryRelevanceLLMOutput,
     JudgeDecision,
 )
 
@@ -246,59 +290,106 @@ class SyncMemoryReader(MemoryReader):
         )
 
 
-class FakeLLM:
+class FakeStructuredRelevanceLLM:
     """
-    Fake LLM。
+    Fake call_llm_structured。
 
-    捕获 Judge 实际发出的 messages，
-    返回预设响应。
+    捕获 Judge 实际发出的 messages 与
+    output_model，返回预设 Structured Output。
 
-    注意：
+    生产 Contract：
 
-    MemoryRelevanceJudge 的 llm_callable
-    Contract 已经是 async：
+        await self._llm_callable(
+            messages=messages,
+            output_model=MemoryRelevanceLLMOutput,
+        )
+        → MemoryRelevanceLLMOutput
 
-        Callable[[list[dict[str, str]]], Awaitable[str]]
-
-    因此 Fake 必须保持同样的 async
-    Calling Contract，
-    否则 await self._llm_callable(...) 会直接失败。
+    因此本 Fake 必须保持同样的
+    keyword-only Calling Contract，
+    并且返回 Structured Output Model，
+    而不是旧实现里的 JSON str。
     """
 
     def __init__(
         self,
-        response=None
+        output=None,
+        exc=None
     ):
-        self._response = response
+        self._output = output
+        self._exc = exc
 
         self.call_count = 0
         self.received_messages = None
+        self.received_output_model = None
+        self.received_model = None
 
     async def __call__(
         self,
-        messages
+        *,
+        messages,
+        output_model,
+        model=None
     ):
         self.call_count += 1
 
         self.received_messages = messages
+        self.received_output_model = output_model
+        self.received_model = model
 
-        if self._response is None:
+        assert (
+            output_model
+            is MemoryRelevanceLLMOutput
+        ), (
+            "Relevance Judge 必须以 "
+            "MemoryRelevanceLLMOutput "
+            "作为 output_model，"
+            f"实际为：{output_model}"
+        )
+
+        if self._exc is not None:
+
+            raise self._exc
+
+        if self._output is None:
 
             raise AssertionError(
-                "FakeLLM 未配置响应"
+                "FakeStructuredRelevanceLLM "
+                "未配置输出"
             )
 
-        return self._response
+        return self._output
 
 
-def decisions_json(
-    decisions
+def llm_decision(
+    index=0,
+    selected=True,
+    reason="fake reason"
 ):
-    return json.dumps(
-        {
-            "decisions": decisions
-        },
-        ensure_ascii=False
+    """
+    构造单条 LLM Boundary Decision。
+
+    这里**不做任何类型预处理**：
+    非法类型应当由 Pydantic 拒绝，
+    而不是被测试 Helper 提前吞掉。
+    """
+
+    return MemoryRelevanceLLMDecision(
+        index=index,
+        selected=selected,
+        reason=reason,
+    )
+
+
+def llm_output(
+    *decisions
+):
+    """
+    构造顶层 Structured Output。
+    """
+
+    return MemoryRelevanceLLMOutput(
+        decisions=list(decisions)
     )
 
 
@@ -307,14 +398,12 @@ def single_decision(
     selected=True,
     reason="fake reason"
 ):
-    return decisions_json(
-        [
-            {
-                "index": index,
-                "selected": selected,
-                "reason": reason,
-            }
-        ]
+    return llm_output(
+        llm_decision(
+            index=index,
+            selected=selected,
+            reason=reason,
+        )
     )
 
 
@@ -356,15 +445,15 @@ def user_payload_of(
 
 
 def build_judge(
-    response
+    output
 ):
     """
-    构造一个使用 Fake LLM 的
+    构造一个使用 Fake Structured LLM 的
     真实 MemoryRelevanceJudge。
     """
 
-    fake_llm = FakeLLM(
-        response=response
+    fake_llm = FakeStructuredRelevanceLLM(
+        output=output
     )
 
     judge = SyncRelevanceJudge(
@@ -409,7 +498,7 @@ def test_judge_sends_historical_status_to_llm():
     """
 
     judge, fake_llm = build_judge(
-        response=single_decision()
+        output=single_decision()
     )
 
     judge.judge(
@@ -465,7 +554,7 @@ def test_judge_sends_current_status_to_llm():
     """
 
     judge, fake_llm = build_judge(
-        response=single_decision()
+        output=single_decision()
     )
 
     judge.judge(
@@ -508,19 +597,9 @@ def test_judge_sends_mixed_statuses_to_llm():
     """
 
     judge, fake_llm = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": "r0",
-                },
-                {
-                    "index": 1,
-                    "selected": False,
-                    "reason": "r1",
-                },
-            ]
+        output=llm_output(
+            llm_decision(0, True, "r0"),
+            llm_decision(1, False, "r1"),
         )
     )
 
@@ -580,7 +659,7 @@ def build_prompt():
     """
 
     judge, fake_llm = build_judge(
-        response=single_decision()
+        output=single_decision()
     )
 
     judge.judge(
@@ -787,7 +866,7 @@ def test_rejects_non_list_candidates():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     for bad in (
@@ -818,7 +897,7 @@ def test_rejects_non_candidate_element():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -840,7 +919,7 @@ def test_rejects_non_str_content():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -865,7 +944,7 @@ def test_rejects_empty_content():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -890,7 +969,7 @@ def test_rejects_blank_content():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -915,7 +994,7 @@ def test_rejects_non_str_memory_status():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -942,7 +1021,7 @@ def test_rejects_illegal_memory_status():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -970,7 +1049,7 @@ def test_empty_candidates_returns_empty_list():
     且不调用 LLM。
     """
 
-    fake_llm = FakeLLM()
+    fake_llm = FakeStructuredRelevanceLLM()
 
     judge = SyncRelevanceJudge(
         llm_callable=fake_llm
@@ -994,7 +1073,7 @@ def test_rejects_invalid_query():
     """
 
     judge = SyncRelevanceJudge(
-        llm_callable=FakeLLM()
+        llm_callable=FakeStructuredRelevanceLLM()
     )
 
     assert_raises(
@@ -1017,6 +1096,258 @@ def test_rejects_invalid_query():
 # ============================================================
 # ============================================================
 # Section 4
+# LLM Boundary Model Contract
+#
+# Structured Output 迁移之后，
+# 下面这些**不再是 Judge 的职责**：
+#
+#     response 是否 str
+#     空字符串 / 空白字符串
+#     Markdown code fence
+#     json.loads 语法解析
+#     JSON 顶层是否 object
+#     decisions 是否 list
+#     index / selected / reason 类型
+#
+# 它们由 Provider / SDK / Pydantic Boundary 承担。
+# 因此这里直接对
+#
+#     MemoryRelevanceLLMDecision
+#     MemoryRelevanceLLMOutput
+#
+# 做 Contract 断言，
+# 不再经由 Judge 的旧 _parse_response 路径。
+# ============================================================
+# ============================================================
+
+
+def assert_model_rejects(
+    build
+):
+    """
+    断言构造 LLM Boundary Model 时被拒绝。
+
+    Pydantic 在 strict 类型不匹配 /
+    必填字段缺失时抛 ValidationError
+    （它是 ValueError 的子类）。
+
+    这里只接受 ValidationError：
+    其他异常类型不应被误判为"已拒绝"。
+    """
+
+    try:
+
+        build()
+
+    except ValidationError:
+
+        return
+
+    raise AssertionError(
+        "Memory Relevance LLM Boundary Model "
+        "应该拒绝该输入"
+    )
+
+
+def test_llm_decision_accepts_valid_payload():
+    """
+    合法 payload：
+
+        index    StrictInt
+        selected StrictBool
+        reason   StrictStr 非空
+
+    并且 reason 在写入业务对象前
+    去除首尾空白。
+    """
+
+    decision = MemoryRelevanceLLMDecision(
+        index=0,
+        selected=True,
+        reason="  这段 Memory 与当前问题相关  ",
+    )
+
+    assert decision.index == 0
+
+    assert decision.selected is True
+
+    assert decision.reason == (
+        "这段 Memory 与当前问题相关"
+    )
+
+
+def test_llm_decision_rejects_non_strict_int_index():
+    """
+    index 必须是严格 int。
+
+    bool 虽然是 int 的子类，
+    StrictInt 不允许它混入；
+    字符串 / 浮点 / None 同样拒绝。
+    """
+
+    for bad_index in (
+        True,
+        False,
+        "0",
+        1.0,
+        None,
+        [0],
+    ):
+
+        assert_model_rejects(
+            lambda bad_index=bad_index: (
+                MemoryRelevanceLLMDecision(
+                    index=bad_index,
+                    selected=True,
+                    reason="r",
+                )
+            )
+        )
+
+
+def test_llm_decision_rejects_non_strict_bool_selected():
+    """
+    selected 必须是严格 bool。
+
+        1 / 0 / "true" / "yes"
+
+    都不能偷偷转换成 bool。
+    """
+
+    for bad_selected in (
+        1,
+        0,
+        "true",
+        "yes",
+        "",
+        None,
+    ):
+
+        assert_model_rejects(
+            lambda bad_selected=bad_selected: (
+                MemoryRelevanceLLMDecision(
+                    index=0,
+                    selected=bad_selected,
+                    reason="r",
+                )
+            )
+        )
+
+
+def test_llm_decision_rejects_non_strict_str_reason():
+    """
+    reason 必须是严格 str。
+    """
+
+    for bad_reason in (
+        123,
+        None,
+        True,
+        ["r"],
+        {"reason": "r"},
+    ):
+
+        assert_model_rejects(
+            lambda bad_reason=bad_reason: (
+                MemoryRelevanceLLMDecision(
+                    index=0,
+                    selected=True,
+                    reason=bad_reason,
+                )
+            )
+        )
+
+
+def test_llm_decision_rejects_blank_reason():
+    """
+    reason 必须非空。
+
+    空白字符串 strip 之后为空，
+    因此同样被拒绝：
+    合法 decision 不允许没有说明。
+    """
+
+    for bad_reason in (
+        "",
+        "   ",
+        "\n\t  ",
+    ):
+
+        assert_model_rejects(
+            lambda bad_reason=bad_reason: (
+                MemoryRelevanceLLMDecision(
+                    index=0,
+                    selected=True,
+                    reason=bad_reason,
+                )
+            )
+        )
+
+
+def test_llm_decision_requires_all_fields():
+    """
+    index / selected / reason
+    都是必填字段。
+    """
+
+    payloads = (
+        {
+            "selected": True,
+            "reason": "r",
+        },
+        {
+            "index": 0,
+            "reason": "r",
+        },
+        {
+            "index": 0,
+            "selected": True,
+        },
+    )
+
+    for payload in payloads:
+
+        assert_model_rejects(
+            lambda payload=payload: (
+                MemoryRelevanceLLMDecision(
+                    **payload
+                )
+            )
+        )
+
+
+def test_llm_output_requires_decisions_list():
+    """
+    decisions 是必填 list。
+
+    None / dict / str 都不是 list；
+    元素本身非法时由
+    MemoryRelevanceLLMDecision 拒绝。
+    """
+
+    assert_model_rejects(
+        lambda: MemoryRelevanceLLMOutput()
+    )
+
+    for bad_decisions in (
+        None,
+        {},
+        "decisions",
+        123,
+    ):
+
+        assert_model_rejects(
+            lambda bad_decisions=bad_decisions: (
+                MemoryRelevanceLLMOutput(
+                    decisions=bad_decisions
+                )
+            )
+        )
+
+
+# ============================================================
+# ============================================================
+# Section 5
 # Output / Coverage Contract
 #
 # JudgeDecision:
@@ -1024,25 +1355,100 @@ def test_rejects_invalid_query():
 #     index
 #     selected
 #     reason
+#
+# Judge 只负责运行时才能确定的
+# 业务关系 + Strict Model → JudgeDecision 转换。
 # ============================================================
 # ============================================================
+
+
+def build_real_invalid_output_error():
+    """
+    真实构造一个 ValidationError：
+
+        MemoryRelevanceLLMOutput(
+            decisions=[
+                MemoryRelevanceLLMDecision(
+                    index="0",   # 不是 StrictInt
+                    ...
+                )
+            ]
+        )
+
+    这正是 Provider 返回无法通过
+    Structured Output 校验的内容时，
+    向上抛出的异常类型。
+    """
+
+    try:
+
+        MemoryRelevanceLLMOutput(
+            decisions=[
+                MemoryRelevanceLLMDecision(
+                    index="0",
+                    selected=True,
+                    reason="r",
+                )
+            ]
+        )
+
+    except ValidationError as exc:
+
+        return exc
+
+    raise AssertionError(
+        "index 不是 StrictInt，"
+        "MemoryRelevanceLLMDecision 应该拒绝"
+    )
+
+
+def test_judge_requests_relevance_llm_output_model():
+    """
+    Judge 必须向 Provider 声明
+    自己需要的是 MemoryRelevanceLLMOutput。
+
+    这是 Structured Output 迁移之后
+    新增的、真实的 Judge 责任：
+    声明输出 Schema。
+    """
+
+    judge, fake_llm = build_judge(
+        output=single_decision()
+    )
+
+    judge.judge(
+        query="我以前主要学什么？",
+        candidates=[
+            MemoryRelevanceCandidate(
+                content="A",
+                memory_status="current"
+            )
+        ]
+    )
+
+    assert (
+        fake_llm.received_output_model
+        is MemoryRelevanceLLMOutput
+    ), (
+        "Judge 必须以 MemoryRelevanceLLMOutput "
+        "作为 output_model"
+    )
 
 
 def test_decision_success_contract():
+    """
+    Structured Output
+        ↓
+    JudgeDecision[]
+
+    index / selected / reason
+    必须完整保留。
+    """
+
     judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": "r0",
-                },
-                {
-                    "index": 1,
-                    "selected": False,
-                    "reason": "r1",
-                },
-            ]
+        output=llm_output(
+            llm_decision(0, True, "r0"),
+            llm_decision(1, False, "r1"),
         )
     )
 
@@ -1085,24 +1491,10 @@ def test_decision_order_is_stable():
     """
 
     judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 2,
-                    "selected": True,
-                    "reason": "r2",
-                },
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": "r0",
-                },
-                {
-                    "index": 1,
-                    "selected": False,
-                    "reason": "r1",
-                },
-            ]
+        output=llm_output(
+            llm_decision(2, True, "r2"),
+            llm_decision(0, True, "r0"),
+            llm_decision(1, False, "r1"),
         )
     )
 
@@ -1131,8 +1523,17 @@ def test_decision_order_is_stable():
 
 
 def test_decision_count_mismatch():
+    """
+    decision 数量 != candidate 数量
+        ↓
+    ValueError
+
+    这是运行时 Coverage Contract，
+    Pydantic 静态模型无法校验。
+    """
+
     judge, _ = build_judge(
-        response=single_decision()
+        output=single_decision()
     )
 
     assert_raises(
@@ -1153,43 +1554,16 @@ def test_decision_count_mismatch():
     )
 
 
-def test_decision_index_type():
-    judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": True,
-                    "selected": True,
-                    "reason": "r",
-                }
-            ]
-        )
-    )
-
-    assert_raises(
-        TypeError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
 def test_decision_index_out_of_range():
+    """
+    index 超出本次 candidate 范围
+        ↓
+    ValueError
+    """
+
     judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 5,
-                    "selected": True,
-                    "reason": "r",
-                }
-            ]
+        output=llm_output(
+            llm_decision(5, True, "r")
         )
     )
 
@@ -1208,20 +1582,16 @@ def test_decision_index_out_of_range():
 
 
 def test_decision_index_duplicate():
+    """
+    index 重复
+        ↓
+    ValueError
+    """
+
     judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": "r0",
-                },
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": "r1",
-                },
-            ]
+        output=llm_output(
+            llm_decision(0, True, "r0"),
+            llm_decision(0, True, "r1"),
         )
     )
 
@@ -1243,246 +1613,68 @@ def test_decision_index_duplicate():
     )
 
 
-def test_decision_selected_must_be_bool():
-    judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 0,
-                    "selected": "true",
-                    "reason": "r",
-                }
-            ]
-        )
-    )
-
-    assert_raises(
-        TypeError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_decision_reason_must_be_str():
-    judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": 123,
-                }
-            ]
-        )
-    )
-
-    assert_raises(
-        TypeError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_decision_reason_must_not_be_empty():
-    judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "index": 0,
-                    "selected": True,
-                    "reason": "   ",
-                }
-            ]
-        )
-    )
-
-    assert_raises(
-        ValueError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_decision_missing_required_field():
-    judge, _ = build_judge(
-        response=decisions_json(
-            [
-                {
-                    "selected": True,
-                    "reason": "r",
-                }
-            ]
-        )
-    )
-
-    assert_raises(
-        ValueError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_response_missing_decisions():
-    judge, _ = build_judge(
-        response=json.dumps(
-            {
-                "results": []
-            }
-        )
-    )
-
-    assert_raises(
-        ValueError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_response_invalid_json():
-    judge, _ = build_judge(
-        response="这不是 JSON"
-    )
-
-    assert_raises(
-        ValueError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_response_empty():
-    judge, _ = build_judge(
-        response="   "
-    )
-
-    assert_raises(
-        ValueError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_response_non_str():
-    judge, _ = build_judge(
-        response=None
-    )
-
-    judge._llm_callable = (
-        lambda messages: 123
-    )
-
-    assert_raises(
-        TypeError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_response_non_object_json():
-    judge, _ = build_judge(
-        response='["decisions"]'
-    )
-
-    assert_raises(
-        ValueError,
-        lambda: judge.judge(
-            query="我以前主要学什么？",
-            candidates=[
-                MemoryRelevanceCandidate(
-                    content="A",
-                    memory_status="current"
-                )
-            ]
-        )
-    )
-
-
-def test_response_markdown_code_fence_accepted():
+def test_structured_llm_failure_propagates_without_fallback():
     """
-    模型返回 ```json ... ``` 时应正常解析。
+    Structured LLM 自身抛异常
+        ↓
+    原异常继续向上抛。
+
+    Failure Policy 没有 fallback：
+
+    Judge 不允许把 LLM 失败静默吞掉，
+    也不允许返回空列表或默认 decision，
+    否则 Reader 会拿到"全部未选中"
+    这种伪装成正常结果的失败。
+
+    这里用两类真实异常来源：
+
+        1. Provider / 网络层失败
+           RuntimeError
+
+        2. Provider 返回无法通过
+           MemoryRelevanceLLMOutput 校验的内容
+           → Pydantic ValidationError
     """
 
-    judge, _ = build_judge(
-        response=(
-            "```json\n"
-            + single_decision()
-            + "\n```"
-        )
+    exceptions = (
+        RuntimeError(
+            "DeepSeek unavailable"
+        ),
+        build_real_invalid_output_error(),
     )
 
-    decisions = judge.judge(
-        query="我以前主要学什么？",
-        candidates=[
-            MemoryRelevanceCandidate(
-                content="A",
-                memory_status="historical"
+    for exc in exceptions:
+
+        fake_llm = FakeStructuredRelevanceLLM(
+            exc=exc
+        )
+
+        judge = SyncRelevanceJudge(
+            llm_callable=fake_llm
+        )
+
+        assert_raises(
+            type(exc),
+            lambda judge=judge: judge.judge(
+                query="我以前主要学什么？",
+                candidates=[
+                    MemoryRelevanceCandidate(
+                        content="A",
+                        memory_status="current"
+                    )
+                ]
             )
-        ]
-    )
+        )
 
-    assert len(decisions) == 1
-    assert decisions[0].selected is True
+        assert fake_llm.call_count == 1, (
+            "失败路径也必须真实调用过一次 "
+            "LLM Boundary"
+        )
 
 
 # ============================================================
 # ============================================================
-# Section 5
+# Section 6
 # Reader → Relevance Judge
 # ============================================================
 # ============================================================
@@ -1927,7 +2119,7 @@ def test_reader_does_not_interpret_scope():
 
 # ============================================================
 # ============================================================
-# Section 6
+# Section 7
 # Architecture Boundary
 # ============================================================
 # ============================================================

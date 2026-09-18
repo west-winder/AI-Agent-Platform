@@ -2,7 +2,15 @@ import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from backend.services.llm_service import chat_completion
+from pydantic import (
+    BaseModel,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    field_validator,
+)
+
+from backend.services.llm_service import call_llm_structured
 
 
 # ==================================================
@@ -50,7 +58,82 @@ class MemoryRelevanceCandidate:
 
 
 # ==================================================
-# Relevance Judge Output Contract
+# Relevance Judge LLM Boundary Contract
+# ==================================================
+
+
+class MemoryRelevanceLLMDecision(BaseModel):
+    """
+    单条 candidate 的 Structured Output。
+
+    这里只描述 LLM 输出本身的静态结构：
+
+    index:
+        candidate 的局部 index。
+
+    selected:
+        是否应该用于当前 Query。
+
+    reason:
+        LLM 给出的判断原因。
+    """
+
+    index: StrictInt
+
+    selected: StrictBool
+
+    reason: StrictStr
+
+    @field_validator(
+        "reason",
+        mode="after",
+    )
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: str,
+    ) -> str:
+        """
+        保留旧 Contract：
+
+        reason 必须是非空字符串，
+        最终写入业务对象前去除首尾空白。
+        """
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "decision.reason 不能为空"
+            )
+
+        return value
+
+
+class MemoryRelevanceLLMOutput(BaseModel):
+    """
+    MemoryRelevanceJudge 的 Structured Output 顶层结构。
+
+    注意：
+
+    本 Model 只负责静态结构校验。
+
+    它不知道本次运行时究竟有多少个 candidate，
+    因此以下动态业务约束仍由 Judge 校验：
+
+    - decision 数量必须等于 candidate 数量
+    - index 必须处于本次 candidate 范围内
+    - index 不允许重复
+    - 必须完整覆盖所有 candidate
+    """
+
+    decisions: list[
+        MemoryRelevanceLLMDecision
+    ]
+
+
+# ==================================================
+# Relevance Judge Business Output Contract
 # ==================================================
 
 
@@ -76,6 +159,12 @@ class JudgeDecision:
     reason: str
 
 
+StructuredRelevanceLLMCallable = Callable[
+    ...,
+    Awaitable[MemoryRelevanceLLMOutput],
+]
+
+
 class MemoryRelevanceJudge:
     """
     Memory Read 阶段的 LLM Relevance Judge。
@@ -86,9 +175,13 @@ class MemoryRelevanceJudge:
         +
     Top-K MemoryRelevanceCandidate[]
         ↓
-    LLM
+    Structured LLM
         ↓
-    Relevance Decision
+    MemoryRelevanceLLMOutput
+        ↓
+    Runtime Coverage Validation
+        ↓
+    JudgeDecision[]
         ↓
     USE / REJECT
 
@@ -143,27 +236,27 @@ class MemoryRelevanceJudge:
 
     def __init__(
         self,
-        llm_callable: Callable[
-            [list[dict[str, str]]],
-            Awaitable[str]
-        ] | None = None
+        llm_callable: (
+            StructuredRelevanceLLMCallable
+            | None
+        ) = None,
     ):
         """
         初始化 Memory Relevance Judge。
 
         参数：
             llm_callable:
-                通用 LLM 调用函数。
+                Structured Output LLM 调用函数。
 
                 默认使用：
-                backend.services.llm_service.chat_completion
+                backend.services.llm_service.call_llm_structured
 
                 支持依赖注入，
-                方便后续测试时使用 Fake LLM。
+                方便测试时使用 Fake Structured LLM。
         """
 
         if llm_callable is None:
-            llm_callable = chat_completion
+            llm_callable = call_llm_structured
 
         self._llm_callable = llm_callable
 
@@ -176,7 +269,7 @@ class MemoryRelevanceJudge:
         query: str,
         candidates: list[
             MemoryRelevanceCandidate
-        ]
+        ],
     ) -> list[JudgeDecision]:
         """
         批量判断候选 Memory
@@ -206,20 +299,18 @@ class MemoryRelevanceJudge:
               ↓
             Build Prompt
               ↓
-            LLM
+            Structured LLM
               ↓
-            JSON String
+            MemoryRelevanceLLMOutput
               ↓
-            Parse
-              ↓
-            Validate
+            Runtime Coverage Validation
               ↓
             JudgeDecision[]
         """
 
         self._validate_input(
             query=query,
-            candidates=candidates
+            candidates=candidates,
         )
 
         if not candidates:
@@ -227,20 +318,17 @@ class MemoryRelevanceJudge:
 
         messages = self._build_messages(
             query=query,
-            candidates=candidates
+            candidates=candidates,
         )
 
-        response = await self._llm_callable(
-            messages
-        )
-
-        data = self._parse_response(
-            response
+        llm_output = await self._llm_callable(
+            messages=messages,
+            output_model=MemoryRelevanceLLMOutput,
         )
 
         decisions = self._validate_decisions(
-            data=data,
-            candidate_count=len(candidates)
+            llm_output=llm_output,
+            candidate_count=len(candidates),
         )
 
         return decisions
@@ -254,7 +342,7 @@ class MemoryRelevanceJudge:
         query: str,
         candidates: list[
             MemoryRelevanceCandidate
-        ]
+        ],
     ):
         """
         校验 Judge 输入。
@@ -280,7 +368,7 @@ class MemoryRelevanceJudge:
 
             if not isinstance(
                 candidate,
-                MemoryRelevanceCandidate
+                MemoryRelevanceCandidate,
             ):
                 raise TypeError(
                     "candidates 中的每个元素必须是 "
@@ -289,7 +377,7 @@ class MemoryRelevanceJudge:
 
             if not isinstance(
                 candidate.content,
-                str
+                str,
             ):
                 raise TypeError(
                     "MemoryRelevanceCandidate.content "
@@ -304,7 +392,7 @@ class MemoryRelevanceJudge:
 
             if not isinstance(
                 candidate.memory_status,
-                str
+                str,
             ):
                 raise TypeError(
                     "MemoryRelevanceCandidate.memory_status "
@@ -329,7 +417,7 @@ class MemoryRelevanceJudge:
         query: str,
         candidates: list[
             MemoryRelevanceCandidate
-        ]
+        ],
     ) -> list[dict[str, str]]:
         """
         构造 LLM Judge Prompt。
@@ -342,7 +430,13 @@ class MemoryRelevanceJudge:
 
             JSON-compatible dict
 
-        再交给 LLM。
+        作为待判断数据交给 LLM。
+
+        注意：
+
+        JSON 这里只用于表达输入数据，
+        不再承担输出 Contract。
+        输出结构由 MemoryRelevanceLLMOutput 定义。
         """
 
         candidate_payloads = [
@@ -364,7 +458,7 @@ class MemoryRelevanceJudge:
             "query": query,
             "candidates": (
                 candidate_payloads
-            )
+            ),
         }
 
         system_prompt = """
@@ -622,157 +716,87 @@ Coverage Contract
 
 
 ==================================================
-返回格式
+输出语义要求
 ==================================================
 
-返回格式必须是严格 JSON：
-
-{
-    "decisions": [
-        {
-            "index": 0,
-            "selected": true,
-            "reason": "简短说明为什么应该或不应该使用"
-        }
-    ]
-}
-
-
-要求：
+每一条 decision 都必须包含：
 
 index
+
 必须对应输入 candidate 的 index。
 
 
 selected
-必须是 JSON boolean：
 
-true
-或
-false
+表示该 candidate
+是否应该用于回答当前 Query。
 
 
 reason
-必须是非空的简短字符串。
 
+必须是非空的简短说明，
+解释为什么应该或不应该使用。
 
-不要返回 Markdown。
-
-不要返回代码块。
-
-不要返回 JSON 之外的其他文本。
+输出结构由系统提供的 Structured Output Schema 约束。
 """.strip()
 
         user_prompt = json.dumps(
             judge_input,
             ensure_ascii=False,
-            indent=2
+            indent=2,
         )
 
         return [
             {
                 "role": "system",
-                "content": system_prompt
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": user_prompt
-            }
+                "content": user_prompt,
+            },
         ]
 
     # ==================================================
-    # Response Parsing
-    # ==================================================
-
-    def _parse_response(
-        self,
-        response: str
-    ) -> dict:
-        """
-        将 LLM 返回文本解析为 JSON。
-        """
-
-        if not isinstance(response, str):
-            raise TypeError(
-                "LLM Judge 返回值必须是 str"
-            )
-
-        response = response.strip()
-
-        if not response:
-            raise ValueError(
-                "LLM Judge 返回了空内容"
-            )
-
-        # 某些模型即使被要求返回纯 JSON，
-        # 仍可能包裹 Markdown code fence。
-        #
-        # 当前实现允许去掉这一层包装，
-        # 但不会自动修复错误 JSON。
-        if (
-            response.startswith("```")
-            and response.endswith("```")
-        ):
-            lines = response.splitlines()
-
-            if len(lines) >= 3:
-                response = "\n".join(
-                    lines[1:-1]
-                ).strip()
-
-        try:
-            data = json.loads(
-                response
-            )
-
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "LLM Judge 返回的内容不是合法 JSON"
-            ) from exc
-
-        if not isinstance(data, dict):
-            raise ValueError(
-                "LLM Judge JSON 顶层必须是 object"
-            )
-
-        return data
-
-    # ==================================================
-    # Decision Validation
+    # Runtime Business Validation
     # ==================================================
 
     def _validate_decisions(
         self,
-        data: dict,
-        candidate_count: int
+        llm_output: MemoryRelevanceLLMOutput,
+        candidate_count: int,
     ) -> list[JudgeDecision]:
         """
-        校验 LLM Judge 返回的数据结构。
+        校验 Structured Output 与本次 candidates
+        之间的动态业务关系。
 
-        确保：
+        Pydantic 已负责：
 
-        1. decisions 存在
-        2. decisions 是 list
-        3. 每个 candidate 都有结果
-        4. index 合法
-        5. index 不重复
-        6. selected 是 bool
-        7. reason 是非空字符串
+        1. decisions 是 list
+        2. 每个 decision 是合法 Model
+        3. index 是 StrictInt
+        4. selected 是 StrictBool
+        5. reason 是非空 StrictStr
+
+        本方法只负责运行时才能确定的 Coverage Contract：
+
+        1. decision 数量与 candidate 数量一致
+        2. index 在本次 candidate 范围内
+        3. index 不重复
+        4. 完整覆盖所有 candidate
+
+        最后将 LLM Boundary Model
+        转换为业务层 JudgeDecision。
         """
 
-        if "decisions" not in data:
-            raise ValueError(
-                "LLM Judge 返回结果缺少 decisions"
-            )
+        raw_decisions = (
+            llm_output.decisions
+        )
 
-        raw_decisions = data["decisions"]
-
-        if not isinstance(raw_decisions, list):
-            raise TypeError(
-                "decisions 必须是 list"
-            )
-
-        if len(raw_decisions) != candidate_count:
+        if (
+            len(raw_decisions)
+            != candidate_count
+        ):
             raise ValueError(
                 "LLM Judge 返回的 decision 数量"
                 "与 candidate 数量不一致"
@@ -784,38 +808,7 @@ reason
 
         for item in raw_decisions:
 
-            if not isinstance(item, dict):
-                raise TypeError(
-                    "每个 decision 必须是 object"
-                )
-
-            if "index" not in item:
-                raise ValueError(
-                    "decision 缺少 index"
-                )
-
-            if "selected" not in item:
-                raise ValueError(
-                    "decision 缺少 selected"
-                )
-
-            if "reason" not in item:
-                raise ValueError(
-                    "decision 缺少 reason"
-                )
-
-            index = item["index"]
-            selected = item["selected"]
-            reason = item["reason"]
-
-            # 注意：
-            # Python 中 bool 是 int 的子类，
-            # 所以这里使用 type(index) is int，
-            # 而不是 isinstance(index, int)。
-            if type(index) is not int:
-                raise TypeError(
-                    "decision.index 必须是 int"
-                )
+            index = item.index
 
             if not (
                 0 <= index < candidate_count
@@ -829,21 +822,6 @@ reason
                     f"decision.index 重复：{index}"
                 )
 
-            if type(selected) is not bool:
-                raise TypeError(
-                    "decision.selected 必须是 bool"
-                )
-
-            if not isinstance(reason, str):
-                raise TypeError(
-                    "decision.reason 必须是 str"
-                )
-
-            if not reason.strip():
-                raise ValueError(
-                    "decision.reason 不能为空"
-                )
-
             seen_indexes.add(
                 index
             )
@@ -851,8 +829,8 @@ reason
             decisions.append(
                 JudgeDecision(
                     index=index,
-                    selected=selected,
-                    reason=reason.strip()
+                    selected=item.selected,
+                    reason=item.reason,
                 )
             )
 

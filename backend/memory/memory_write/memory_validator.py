@@ -1,8 +1,8 @@
-import json
+from pydantic import BaseModel, StrictBool, StrictStr
 
 from backend.schemas.memory_candidate import MemoryCandidate
 from backend.schemas.memory_validation import MemoryValidationResult
-from backend.services.llm_service import call_llm
+from backend.services.llm_service import call_llm_structured
 
 
 # ==================================================
@@ -18,8 +18,28 @@ ALLOWED_MEMORY_TYPES = {
 
 
 # ==================================================
+# Memory Validator LLM Boundary Contract
+# ==================================================
+
+
+class MemoryValidatorLLMOutput(BaseModel):
+    """
+    MemoryValidator 的 Structured Output 边界模型。
+
+    保留旧 Contract：
+    - valid 必须是 bool
+    - reason 必须是 str
+    - reason 允许为空字符串
+    """
+
+    valid: StrictBool
+    reason: StrictStr
+
+
+# ==================================================
 # MemoryValidator
 # ==================================================
+
 
 class MemoryValidator:
     """
@@ -53,10 +73,6 @@ class MemoryValidator:
         这一层不调用LLM。
         """
 
-        # --------------------------------------------------
-        # 规则1：content不能为空
-        # --------------------------------------------------
-
         content = candidate.content.strip()
 
         if not content:
@@ -65,29 +81,17 @@ class MemoryValidator:
                 reason="Memory内容不能为空"
             )
 
-        # --------------------------------------------------
-        # 规则2：内容不能过短
-        # --------------------------------------------------
-
         if len(content) < 5:
             return MemoryValidationResult(
                 valid=False,
                 reason="Memory内容过短，缺乏足够的信息量"
             )
 
-        # --------------------------------------------------
-        # 规则3：memory_type必须属于允许范围
-        # --------------------------------------------------
-
         if candidate.memory_type not in ALLOWED_MEMORY_TYPES:
             return MemoryValidationResult(
                 valid=False,
                 reason=f"不支持的Memory类型：{candidate.memory_type}"
             )
-
-        # --------------------------------------------------
-        # 所有基础规则通过
-        # --------------------------------------------------
 
         return MemoryValidationResult(
             valid=True,
@@ -108,13 +112,14 @@ class MemoryValidator:
         注意：
         LLM只负责语义判断，
         不负责数据库操作。
-        """
 
-        # --------------------------------------------------
-        # System Prompt
-        #
-        # 定义LLM的角色和判断标准
-        # --------------------------------------------------
+        Structured Output 只替换旧的：
+        str -> json.loads -> 手工字段校验。
+
+        原有 fail-closed 策略保持不变：
+        任意 LLM / Provider / Structured Validation 失败
+        都返回 valid=False，不影响 Chat 主流程。
+        """
 
         system_prompt = """
             你是一个AI Agent的Memory Validation模块。
@@ -241,32 +246,23 @@ class MemoryValidator:
 
 
             ==================================================
-            五、输出要求
+            五、输出语义要求
             ==================================================
 
-            请严格返回JSON。
-            不要输出JSON之外的任何内容。
+            你必须给出：
 
-            返回格式：
+            valid
 
-            {
-                "valid": true,
-                "reason": "简短说明判断原因"
-            }
+            表示这条 Memory Candidate
+            是否值得进入长期 Memory。
 
-            或者：
+            reason
 
-            {
-                "valid": false,
-                "reason": "简短说明判断原因"
-            }
+            简短说明判断原因。
+
+            输出结构由系统提供的
+            Structured Output Schema 约束。
         """
-
-        # --------------------------------------------------
-        # User Prompt
-        #
-        # 提供本次需要判断的Candidate
-        # --------------------------------------------------
 
         user_prompt = f"""
             请判断下面这条Memory Candidate：
@@ -277,17 +273,6 @@ class MemoryValidator:
             memory_type:
             {candidate.memory_type}
         """
-
-        # --------------------------------------------------
-        # 构造LLM标准消息格式
-        #
-        # 注意：
-        # call_llm()要求的是：
-        #
-        # List[Dict[str, str]]
-        #
-        # 而不是单独的字符串。
-        # --------------------------------------------------
 
         messages = [
             {
@@ -301,57 +286,17 @@ class MemoryValidator:
         ]
 
         try:
-            # --------------------------------------------------
-            # 调用统一LLM Service
-            # --------------------------------------------------
-
-            response = await call_llm(messages)
-
-            # --------------------------------------------------
-            # 解析LLM返回的JSON
-            # --------------------------------------------------
-
-            result = json.loads(response)
-
-            valid = result.get("valid")
-            reason = result.get("reason")
-
-            # --------------------------------------------------
-            # 校验LLM输出结构
-            # --------------------------------------------------
-
-            if not isinstance(valid, bool):
-                return MemoryValidationResult(
-                    valid=False,
-                    reason="LLM返回的valid字段不是布尔值"
-                )
-
-            if not isinstance(reason, str):
-                return MemoryValidationResult(
-                    valid=False,
-                    reason="LLM返回的reason字段不是字符串"
-                )
-
-            return MemoryValidationResult(
-                valid=valid,
-                reason=reason
+            llm_output = await call_llm_structured(
+                messages=messages,
+                output_model=MemoryValidatorLLMOutput,
             )
 
-        except json.JSONDecodeError:
             return MemoryValidationResult(
-                valid=False,
-                reason="LLM返回的内容不是合法JSON"
+                valid=llm_output.valid,
+                reason=llm_output.reason,
             )
 
         except Exception as e:
-            # --------------------------------------------------
-            # Memory Validation失败不能影响Chat主流程。
-            #
-            # 因此：
-            # Validation失败 → 不保存Memory
-            # 但Chat仍然可以正常完成。
-            # --------------------------------------------------
-
             return MemoryValidationResult(
                 valid=False,
                 reason=f"Memory Validation执行失败：{str(e)}"
@@ -373,17 +318,9 @@ class MemoryValidator:
         LLM Validation
         """
 
-        # --------------------------------------------------
-        # 第一阶段：规则验证
-        # --------------------------------------------------
-
         rule_result = self.validate_rules(candidate)
 
         if not rule_result.valid:
             return rule_result
-
-        # --------------------------------------------------
-        # 第二阶段：LLM语义验证
-        # --------------------------------------------------
 
         return await self.validate_with_llm(candidate)

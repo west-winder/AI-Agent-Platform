@@ -1,11 +1,14 @@
 import json
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 from backend.schemas.memory_candidate import MemoryCandidate
 from backend.schemas.memory_relationship import (
     MemoryRelationship,
     MemoryRelationshipResult,
 )
-from backend.services.llm_service import call_llm
+from backend.services.llm_service import call_llm_structured
 
 
 # ==================================================
@@ -18,6 +21,84 @@ ALLOWED_RELATIONSHIPS = {
     "related",
     "new",
 }
+
+
+# ==================================================
+# Relationship Judge LLM Boundary Contract
+# ==================================================
+
+
+class MemoryRelationshipLLMItem(BaseModel):
+    """
+    单条 Relationship Structured Output。
+
+    这里故意先使用 Any 接住字段，
+    再由 MemoryRelationshipJudge 按旧 Contract
+    做逐条过滤。
+
+    原实现的行为是：
+
+    - 某一条 memory_id 非法 -> 跳过该条
+    - 某一条 relationship 非法 -> 跳过该条
+    - 某一条 reason 非法 -> 跳过该条
+    - 同批次其他合法 Relationship 仍然保留
+
+    如果直接把字段定义成 StrictInt / Literal / StrictStr，
+    单条坏 item 可能导致整个 Structured Output
+    Validation 失败，从而改变原来的逐条 skip 行为。
+    """
+
+    memory_id: Any = None
+    relationship: Any = None
+    reason: Any = None
+
+
+class MemoryRelationshipLLMOutput(BaseModel):
+    """
+    Relationship Judge 的 Structured Output 顶层结构。
+
+    顶层负责：
+
+    - relationships 缺失 -> []
+    - relationships=None -> []
+    - relationships 非 list -> ValidationError
+    - 非 dict / 非 MemoryRelationshipLLMItem item -> 跳过
+
+    动态业务约束仍由 Judge / Coverage Validator 负责。
+    """
+
+    relationships: list[
+        MemoryRelationshipLLMItem
+    ] = Field(default_factory=list)
+
+    @field_validator(
+        "relationships",
+        mode="before",
+    )
+    @classmethod
+    def preserve_per_item_skip_contract(
+        cls,
+        value,
+    ):
+        if value is None:
+            return []
+
+        if not isinstance(value, list):
+            raise ValueError(
+                "relationships 必须是 list"
+            )
+
+        return [
+            item
+            for item in value
+            if isinstance(
+                item,
+                (
+                    dict,
+                    MemoryRelationshipLLMItem,
+                ),
+            )
+        ]
 
 
 # ==================================================
@@ -279,26 +360,25 @@ vs
 
 
 ==================================================
-六、输出要求
+六、输出语义要求
 ==================================================
 
-必须严格返回 JSON。
+你必须为每一个输入的 Existing Memory
+返回一个 Relationship。
 
-不得输出任何 JSON 之外的内容。
+每条 Relationship 必须包含：
 
-返回格式：
+memory_id
 
-{
-    "relationships": [
-        {
-            "memory_id": 1,
-            "relationship": "duplicate",
-            "reason": "两条Memory表达的是同一个长期偏好。"
-        }
-    ]
-}
+必须对应输入 Existing Memory
+中的 memory_id。
 
-relationship 只能是：
+不得生成输入中不存在的 memory_id。
+
+
+relationship
+
+只能是：
 
 duplicate
 conflict
@@ -306,13 +386,12 @@ related
 new
 
 
-memory_id 必须对应输入 Existing Memory
-中的 memory_id。
+reason
 
-不得生成输入中不存在的 memory_id。
+必须简短说明为什么判断为该 Relationship。
 
-必须为每一个输入的 Existing Memory
-返回一个 Relationship。
+输出结构由系统提供的
+Structured Output Schema 约束。
 """
 
     # ==================================================
@@ -431,68 +510,35 @@ Existing Memories:
         ]
 
         # --------------------------------------------------
-        # 调用 LLM
+        # 调用 Structured Output LLM
         # --------------------------------------------------
 
         try:
 
-            response = await call_llm(
-                messages
+            llm_output = await call_llm_structured(
+                messages=messages,
+                output_model=MemoryRelationshipLLMOutput,
             )
-
-            if not response:
-
-                return MemoryRelationshipResult(
-                    relationships=[]
-                )
-
-            # --------------------------------------------------
-            # JSON Parse
-            # --------------------------------------------------
-
-            data = json.loads(
-                response
-            )
-
-            relationships_data = data.get(
-                "relationships",
-                []
-            )
-
-            if not isinstance(
-                relationships_data,
-                list
-            ):
-
-                return MemoryRelationshipResult(
-                    relationships=[]
-                )
 
             # --------------------------------------------------
             # 构造 Relationship Result
+            #
+            # 这里继续保留旧的逐条 skip Contract：
+            #
+            # 单条坏 Relationship
+            # 不影响同批次其他合法 Relationship。
+            #
+            # Pydantic 负责顶层 Structured Output，
+            # Judge 继续负责当前业务上下文中的逐条校验。
             # --------------------------------------------------
 
             relationships = []
 
-            for item in relationships_data:
+            for item in llm_output.relationships:
 
-                if not isinstance(
-                    item,
-                    dict
-                ):
-                    continue
-
-                memory_id = item.get(
-                    "memory_id"
-                )
-
-                relationship = item.get(
-                    "relationship"
-                )
-
-                reason = item.get(
-                    "reason"
-                )
+                memory_id = item.memory_id
+                relationship = item.relationship
+                reason = item.reason
 
                 # ----------------------------------------------
                 # memory_id 类型检查
@@ -507,7 +553,10 @@ Existing Memories:
                 # ----------------------------------------------
                 # memory_id 合法性检查
                 #
-                # 防止 LLM 返回不存在的 Memory ID。
+                # valid_memory_ids 是本次运行时
+                # 根据 Existing Memories 动态生成的集合。
+                # 这属于 Runtime Business Validation，
+                # 不能只靠静态 Schema 表达。
                 # ----------------------------------------------
 
                 if memory_id not in valid_memory_ids:
@@ -534,7 +583,7 @@ Existing Memories:
                     continue
 
                 # ----------------------------------------------
-                # 创建 Relationship
+                # 创建 Business Relationship
                 # ----------------------------------------------
 
                 relationships.append(
@@ -549,13 +598,21 @@ Existing Memories:
                 relationships=relationships
             )
 
-        except json.JSONDecodeError:
-
-            return MemoryRelationshipResult(
-                relationships=[]
-            )
-
         except Exception:
+            # --------------------------------------------------
+            # 保持旧 Failure Policy：
+            #
+            # Provider Error
+            # Structured Output Validation Error
+            # Runtime Processing Error
+            #
+            # 都先收敛为：
+            #
+            # MemoryRelationshipResult(relationships=[])
+            #
+            # 后续由 validate_relationship_coverage()
+            # 发现覆盖不完整并触发 Fail Closed。
+            # --------------------------------------------------
 
             return MemoryRelationshipResult(
                 relationships=[]
