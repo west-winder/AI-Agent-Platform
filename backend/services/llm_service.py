@@ -47,11 +47,17 @@ LLM_HTTP_TIMEOUT = httpx2.Timeout(
     pool=LLM_POOL_TIMEOUT_SECONDS,
 )
 
+LLM_MAX_RETRIES = int(
+    os.getenv("LLM_MAX_RETRIES", "2")
+)
+
+
 # 初始化DeepSeek客户端
 client = AsyncOpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url=os.getenv("DEEPSEEK_BASE_URL"),
     timeout=LLM_HTTP_TIMEOUT,
+    max_retries=LLM_MAX_RETRIES,
 )
 
 StructuredOutputT = TypeVar(
@@ -90,7 +96,7 @@ async def chat_completion(
 
     # 调用DeepSeek API
     async with asyncio.timeout(
-    LLM_CHAT_OVERALL_TIMEOUT_SECONDS
+        LLM_CHAT_OVERALL_TIMEOUT_SECONDS
     ):
         response = await client.chat.completions.create(
             model=model,
