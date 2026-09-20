@@ -4,15 +4,54 @@ import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from collections.abc import AsyncIterator
+import asyncio
+import httpx2
+
 
 # 加载.env文件
 load_dotenv()
 
+# ============================================
+# LLM Timeout Configuration
+# ============================================
+
+LLM_CONNECT_TIMEOUT_SECONDS = float(
+    os.getenv("LLM_CONNECT_TIMEOUT_SECONDS", "5")
+)
+
+LLM_READ_TIMEOUT_SECONDS = float(
+    os.getenv("LLM_READ_TIMEOUT_SECONDS", "120")
+)
+
+LLM_WRITE_TIMEOUT_SECONDS = float(
+    os.getenv("LLM_WRITE_TIMEOUT_SECONDS", "30")
+)
+
+LLM_POOL_TIMEOUT_SECONDS = float(
+    os.getenv("LLM_POOL_TIMEOUT_SECONDS", "5")
+)
+
+LLM_CHAT_OVERALL_TIMEOUT_SECONDS = float(
+    os.getenv("LLM_CHAT_OVERALL_TIMEOUT_SECONDS", "120")
+)
+
+LLM_STRUCTURED_OVERALL_TIMEOUT_SECONDS = float(
+    os.getenv("LLM_STRUCTURED_OVERALL_TIMEOUT_SECONDS", "30")
+)
+
+LLM_HTTP_TIMEOUT = httpx2.Timeout(
+    60.0,
+    connect=LLM_CONNECT_TIMEOUT_SECONDS,
+    read=LLM_READ_TIMEOUT_SECONDS,
+    write=LLM_WRITE_TIMEOUT_SECONDS,
+    pool=LLM_POOL_TIMEOUT_SECONDS,
+)
 
 # 初始化DeepSeek客户端
 client = AsyncOpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url=os.getenv("DEEPSEEK_BASE_URL")
+    base_url=os.getenv("DEEPSEEK_BASE_URL"),
+    timeout=LLM_HTTP_TIMEOUT,
 )
 
 StructuredOutputT = TypeVar(
@@ -50,10 +89,13 @@ async def chat_completion(
 
 
     # 调用DeepSeek API
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages
-    )
+    async with asyncio.timeout(
+    LLM_CHAT_OVERALL_TIMEOUT_SECONDS
+    ):
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages
+        )
 
 
     # 获取AI回复文本
@@ -119,11 +161,14 @@ async def structured_completion(
         "deepseek-flash"
     )
 
-    response = await client.responses.parse(
-        model=actual_model,
-        input=messages,
-        text_format=output_model,
-    )
+    async with asyncio.timeout(
+        LLM_STRUCTURED_OVERALL_TIMEOUT_SECONDS
+    ):
+        response = await client.responses.parse(
+            model=actual_model,
+            input=messages,
+            text_format=output_model,
+        )
 
     parsed = response.output_parsed
 
