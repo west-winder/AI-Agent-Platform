@@ -44,6 +44,10 @@ os.environ.setdefault(
 
 from backend.services import llm_service
 
+from backend.exceptions.external_exceptions import (
+    ExternalTimeoutError,
+)
+
 
 # =========================================================
 # Fake Structured Output
@@ -142,8 +146,17 @@ def test_chat_completion_has_overall_timeout(
             ]
         )
 
-    with pytest.raises(TimeoutError):
+    # Error Handling V1：
+    # Overall Timeout 触发后，llm_service 会把 TimeoutError
+    # 翻译成项目级 ExternalTimeoutError，
+    # 并保留原始 TimeoutError 作为 __cause__。
+    #
+    # 本测试验证的核心仍然是
+    # “普通 Chat 受 Application Overall Timeout 保护”。
+    with pytest.raises(ExternalTimeoutError) as exc_info:
         asyncio.run(run())
+
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
 
 
 # =========================================================
@@ -195,8 +208,13 @@ def test_structured_completion_has_overall_timeout(
             output_model=FakeStructuredOutput,
         )
 
-    with pytest.raises(TimeoutError):
+    # 同 test_chat_completion_has_overall_timeout：
+    # TimeoutError → ExternalTimeoutError 翻译，
+    # 原始 TimeoutError 保留在 __cause__。
+    with pytest.raises(ExternalTimeoutError) as exc_info:
         asyncio.run(run())
+
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
 
 
 # =========================================================

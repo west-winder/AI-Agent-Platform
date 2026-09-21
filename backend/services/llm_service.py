@@ -2,7 +2,21 @@ from typing import List, Dict, Optional, TypeVar
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+
+from openai import (
+    AsyncOpenAI,
+    APIError,
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+)
+
+from backend.exceptions.external_exceptions import (
+    ExternalServiceError,
+    ExternalTimeoutError,
+    ExternalRequestError,
+)
+
 from collections.abc import AsyncIterator
 import asyncio
 import httpx2
@@ -60,10 +74,90 @@ client = AsyncOpenAI(
     max_retries=LLM_MAX_RETRIES,
 )
 
+
 StructuredOutputT = TypeVar(
     "StructuredOutputT",
     bound=BaseModel,
 )
+
+# ============================================
+# External Error Translation
+# ============================================
+def _translate_external_error(
+    exc: TimeoutError | APIError,
+) -> ExternalServiceError:
+
+    # --------------------------------------------------
+    # 1. Timeout
+    #
+    # Python Overall Timeout
+    # +
+    # OpenAI SDK / HTTP Timeout
+    # --------------------------------------------------
+
+    if isinstance(
+        exc,
+        (TimeoutError, APITimeoutError),
+    ):
+        return ExternalTimeoutError(
+            "外部服务调用超时"
+        )
+
+    # --------------------------------------------------
+    # 2. Connection Failure
+    # --------------------------------------------------
+
+    if isinstance(
+        exc,
+        APIConnectionError,
+    ):
+        return ExternalServiceError(
+            "外部服务当前不可用"
+        )
+
+    # --------------------------------------------------
+    # 3. HTTP Status Error
+    # --------------------------------------------------
+
+    if isinstance(
+        exc,
+        APIStatusError,
+    ):
+        status_code = exc.status_code
+
+        # Provider 明确返回 Request Timeout
+        if status_code == 408:
+            return ExternalTimeoutError(
+                "外部服务调用超时"
+            )
+
+        # Conflict / Rate Limit / Server Error
+        if (
+            status_code in {409, 429}
+            or status_code >= 500
+        ):
+            return ExternalServiceError(
+                "外部服务当前不可用"
+            )
+
+        # 其他 4xx：
+        # 请求 / 认证 / 权限 / 配置等问题
+        if 400 <= status_code < 500:
+            return ExternalRequestError(
+                "外部服务请求或配置存在问题"
+            )
+
+    # --------------------------------------------------
+    # 4. SDK Boundary Fallback
+    #
+    # 已确认属于 OpenAI SDK APIError，
+    # 但 V1 没有进一步分类。
+    # --------------------------------------------------
+
+    return ExternalServiceError(
+        "外部服务调用失败"
+    )
+
 
 
 async def chat_completion(
@@ -95,14 +189,23 @@ async def chat_completion(
 
 
     # 调用DeepSeek API
-    async with asyncio.timeout(
-        LLM_CHAT_OVERALL_TIMEOUT_SECONDS
-    ):
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages
+    try:
+
+        async with asyncio.timeout(
+            LLM_CHAT_OVERALL_TIMEOUT_SECONDS
+        ):
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages
+            )
+
+    except (TimeoutError, APIError) as exc:
+
+        external_error = (
+            _translate_external_error(exc)
         )
 
+        raise external_error from exc
 
     # 获取AI回复文本
     answer = response.choices[0].message.content
@@ -126,22 +229,58 @@ async def call_llm(
 
 
 async def stream_chat_completion(
-    messages: List[Dict[str,str]],
+    messages: List[Dict[str, str]],
     model: str | None = None,
 ) -> AsyncIterator[str]:
 
-    actual_model = model or os.getenv("DEFAULT_MODEL")
-
-    stream = await client.chat.completions.create(
-        model=actual_model,
-        messages=messages,
-        stream=True
+    actual_model = (
+        model
+        or os.getenv("DEFAULT_MODEL")
     )
 
-    async for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    # ============================================
+    # 1. 建立 Stream
+    # ============================================
+
+    try:
+
+        stream = await client.chat.completions.create(
+            model=actual_model,
+            messages=messages,
+            stream=True
+        )
+
+    except (TimeoutError, APIError) as exc:
+
+        external_error = (
+            _translate_external_error(exc)
+        )
+
+        raise external_error from exc
+
+
+    # ============================================
+    # 2. 消费 Stream
+    # ============================================
+
+    try:
+
+        async for chunk in stream:
+
+            content = (
+                chunk.choices[0].delta.content
+            )
+
+            if content:
+                yield content
+
+    except (TimeoutError, APIError) as exc:
+
+        external_error = (
+            _translate_external_error(exc)
+        )
+
+        raise external_error from exc
 
 
 async def stream_llm(
@@ -153,11 +292,11 @@ async def stream_llm(
         messages = messages,
         model = model
     ):
-            yield chunk
+        yield chunk
 
 
 async def structured_completion(
-    messages: List[Dict[str,str]],
+    messages: List[Dict[str, str]],
     output_model: type[StructuredOutputT],
     model: Optional[str] = None,
 ) -> StructuredOutputT:
@@ -167,14 +306,24 @@ async def structured_completion(
         "deepseek-flash"
     )
 
-    async with asyncio.timeout(
-        LLM_STRUCTURED_OVERALL_TIMEOUT_SECONDS
-    ):
-        response = await client.responses.parse(
-            model=actual_model,
-            input=messages,
-            text_format=output_model,
+    try:
+
+        async with asyncio.timeout(
+            LLM_STRUCTURED_OVERALL_TIMEOUT_SECONDS
+        ):
+            response = await client.responses.parse(
+                model=actual_model,
+                input=messages,
+                text_format=output_model,
+            )
+
+    except (TimeoutError, APIError) as exc:
+
+        external_error = (
+            _translate_external_error(exc)
         )
+
+        raise external_error from exc
 
     parsed = response.output_parsed
 

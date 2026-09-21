@@ -253,8 +253,84 @@ def load_messages(title, conversation_map):
 
 
 # ==================================================
-# Chat
+# Chat Error Display
 # ==================================================
+
+def _read_error_detail(response):
+    """
+    安全读取 FastAPI Error Response 的 detail。
+
+    body 不是 JSON / 不是 dict / detail 缺失 /
+    detail 非 str / detail 为空，
+    一律返回 None，不向上抛出。
+    """
+
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    if isinstance(detail, str) and detail:
+        return detail
+
+    return None
+
+
+def _chat_error_text(response):
+    """
+    Backend Error Handling V1：
+
+    非 2xx Response → 稳定用户提示。
+
+    不暴露 traceback / SDK 异常类名 / 后端内部信息。
+
+    HTTP Status 只能表达一部分失败语义：
+
+    504 / 503 与 Backend Router 的
+    External Error → HTTP Mapping 一一对应，
+    可以固定文案。
+
+    500 不能直接认定为 ExternalRequestError：
+
+    - Router 主动返回的 ExternalRequestError
+      带 detail = "外部服务请求失败"；
+    - 但 Programming Error（AttributeError / TypeError /
+      IndexError 等）同样会由 FastAPI 返回 500，
+      却没有该 detail。
+
+    因此 500 只依据可靠 detail 判断，
+    否则回退通用 Internal Error 提示，
+    避免把 Programming Error 重新伪装成 External Error。
+    """
+
+    if response is None:
+        return "请求失败：无法连接服务器"
+
+    status = response.status_code
+
+    if status == 504:
+        return "外部服务响应超时"
+
+    if status == 503:
+        return "外部服务暂时不可用"
+
+    detail = _read_error_detail(response)
+
+    if status == 500:
+
+        if detail == "外部服务请求失败":
+            return "外部服务请求失败"
+
+        return "服务器内部错误"
+
+    # 其他非 200：
+    # 优先使用 FastAPI detail（Business Error，
+    # 如 "Conversation not found"）。
+    if detail is not None:
+        return detail
+
+    return "请求失败"
+
 
 def chat(message, history, conversation_id, stream_enabled=True):
     """
@@ -350,7 +426,7 @@ def chat(message, history, conversation_id, stream_enabled=True):
             gradio_messages.append(
                 {
                     "role": "assistant",
-                    "content": "请求失败",
+                    "content": _chat_error_text(response),
                 }
             )
 
@@ -426,7 +502,9 @@ def chat(message, history, conversation_id, stream_enabled=True):
 
             if response.status_code != 200:
 
-                gradio_messages[-1]["content"] = "请求失败"
+                gradio_messages[-1]["content"] = (
+                    _chat_error_text(response)
+                )
 
                 yield gradio_messages, ""
 
@@ -463,6 +541,50 @@ def chat(message, history, conversation_id, stream_enabled=True):
 
                     # 单个 chunk 解析失败不中断整条流
                     continue
+
+                # --------------------------------------------------
+                # SSE Error Event
+                #
+                # Backend Error Handling V1：
+                # Streaming 中途的 External Error 以
+                # {"type": "error", "code": "...", "message": "..."}
+                # 形式下发。
+                #
+                # 前端不把 error payload 当普通 token 拼接，
+                # 立即停止正常 Streaming 拼接：
+                #
+                # - 已有 partial answer → 保留 + 尾部追加简短提示
+                # - 没有 partial answer → 直接显示简洁错误提示
+                # --------------------------------------------------
+
+                if chunk_data.get("type") == "error":
+
+                    error_message = (
+                        chunk_data.get("message")
+                    )
+
+                    if (
+                        not isinstance(error_message, str)
+                        or not error_message
+                    ):
+                        error_message = "生成中断"
+
+                    if assistant_text:
+
+                        gradio_messages[-1]["content"] = (
+                            f"{assistant_text}"
+                            f"\n\n[生成中断：{error_message}]"
+                        )
+
+                    else:
+
+                        gradio_messages[-1]["content"] = (
+                            error_message
+                        )
+
+                    yield gradio_messages, ""
+
+                    return
 
                 delta = chunk_data.get("delta")
 
