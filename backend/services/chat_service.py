@@ -1,3 +1,6 @@
+import logging
+from collections.abc import AsyncIterator
+
 from sqlalchemy.orm import Session
 
 from backend.schemas.message import MessageCreate
@@ -21,7 +24,13 @@ from backend.memory.memory_read.memory_reader import (
     MemoryReader
 )
 
-from collections.abc import AsyncIterator
+
+
+# ==================================================
+# Module Logger
+# ==================================================
+
+logger = logging.getLogger(__name__)
 
 # ==================================================
 # Memory Reader
@@ -116,7 +125,7 @@ async def chat(
             memory_read_result.memory_context
         )
 
-    except Exception as e:
+    except Exception:
 
         # ==================================================
         # Memory Read 属于增强能力。
@@ -128,8 +137,15 @@ async def chat(
         # 降级为普通 Chat。
         # ==================================================
 
-        print(
-            f"Memory read failed: {e}"
+        logger.warning(
+            "Memory read failed",
+            extra={
+                "operation": "memory_read",
+                "user_id": conversation.user_id,
+                "conversation_id": conversation_id,
+                "fallback": "empty_memory_context",
+            },
+            exc_info=True,
         )
 
     # ==================================================
@@ -245,7 +261,7 @@ async def chat(
             user_message=user_message,
         )
 
-    except Exception as e:
+    except Exception:
 
         # ==================================================
         # Memory Write 同样属于增强能力。
@@ -253,9 +269,15 @@ async def chat(
         # Memory Write 失败，
         # 不应该影响已经完成的正常 Chat。
         # ==================================================
-
-        print(
-            f"Memory write failed: {e}"
+        logger.warning(
+            "Memory write failed",
+            extra={
+                "operation": "memory_write",
+                "user_id": conversation.user_id,
+                "conversation_id": conversation_id,
+                "fallback": "skip_memory_write",
+            },
+            exc_info=True,
         )
 
     # ==================================================
@@ -352,7 +374,7 @@ async def stream_chat(
             memory_read_result.memory_context
         )
 
-    except Exception as e:
+    except Exception:
 
         # ==================================================
         # Memory Read 属于增强能力。
@@ -364,8 +386,15 @@ async def stream_chat(
         # 降级为普通 Chat。
         # ==================================================
 
-        print(
-            f"Memory read failed: {e}"
+        logger.warning(
+            "Memory read failed",
+            extra={
+                "operation": "memory_read",
+                "user_id": conversation.user_id,
+                "conversation_id": conversation_id,
+                "fallback": "empty_memory_context",
+            },
+            exc_info=True,
         )
 
     # ==================================================
@@ -487,7 +516,7 @@ async def stream_chat(
             user_message=user_message,
         )
 
-    except Exception as e:
+    except Exception:
 
         # ==================================================
         # Memory Write 同样属于增强能力。
@@ -496,6 +525,13 @@ async def stream_chat(
         # 不应该影响已经完成的正常 Chat。
         # ==================================================
 
-        print(
-            f"Memory write failed: {e}"
+        logger.warning(
+            "Memory write failed",
+            extra={
+                "operation": "memory_write",
+                "user_id": conversation.user_id,
+                "conversation_id": conversation_id,
+                "fallback": "skip_memory_write",
+            },
+            exc_info=True,
         )

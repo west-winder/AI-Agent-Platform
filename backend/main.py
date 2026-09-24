@@ -13,6 +13,10 @@ from backend.routers import message as message_router
 from backend.routers import model as model_router
 from backend.routers import user as user_router
 from backend.routers.memory import router as memory_router
+from backend.config.logging_config import configure_logging
+
+# 配置日志
+configure_logging()
 
 # 初始化数据库表
 Base.metadata.create_all(bind=engine)
