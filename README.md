@@ -1,43 +1,33 @@
 # AI Agent Platform
 
-基于 **FastAPI + SQLAlchemy + DeepSeek + Gradio** 构建的 AI Agent 应用平台。
-
-项目目标是从真实工程实践出发，逐步实现一个具备以下能力的完整 AI Agent Platform：
-
-- 多 Agent
-- 多会话
-- 消息持久化
-- Long-term Memory
-- RAG
-- Tool Calling
-- Agent Workflow
-- Full-stack UI
+基于 **FastAPI + PostgreSQL + DeepSeek + Gradio** 构建的 AI Agent 应用平台。
 
 当前版本：
 
-**v0.2 — Memory System**
+**v0.3 — PostgreSQL Runtime Baseline + Backend / LLM I/O Foundation**
 
 ---
 
-## 项目简介
+## Project Purpose
 
-AI Agent Platform 是一个面向 AI Agent 工程开发学习的全栈项目。
+AI Agent Platform 不是简单的 Chatbot Demo。
+
+项目目标是通过一个持续演进的真实工程，学习和展示完整的 AI Agent 工程能力：
+
+```text
+Backend Engineering
+LLM Application Engineering
+Memory
+RAG
+Tool Calling
+Agent Loop
+Workflow
+Observability / Evaluation
+Frontend
+Deployment
+```
 
 项目重点不是训练大语言模型，而是围绕现有 LLM、Embedding、Reranker 等模型，构建完整的 AI 应用工程系统。
-
-当前项目已经覆盖：
-
-- Agent 管理
-- Conversation 管理
-- Message 持久化
-- Agent Snapshot
-- DeepSeek LLM 接入
-- Gradio Chat UI
-- Long-term Memory Write
-- Hybrid Memory Retrieval
-- Memory Relevance Judge
-- Memory Lifecycle
-- Historical Memory Retrieval
 
 项目开发过程中重点关注：
 
@@ -49,6 +39,67 @@ AI Agent Platform 是一个面向 AI Agent 工程开发学习的全栈项目。
 - Graceful Degradation
 - Deterministic Regression Test
 - Incremental Architecture Evolution
+
+---
+
+## Current Stage
+
+```text
+v0.3
+
+Stage 0 — Memory + PostgreSQL
+COMPLETE
+
+Stage 1 — Backend + LLM I/O Foundation
+COMPLETE
+
+Stage 2 — Unified RAG
+NEXT
+```
+
+### v0.1 — Basic Agent Chat Platform
+
+- Agent
+- Conversation
+- Message
+- Agent Snapshot
+- DeepSeek
+- Gradio
+
+**Completed**
+
+### v0.2 — Long-term Memory System
+
+- Memory Extraction
+- Memory Validation
+- Exact Dedup
+- Related Memory Retrieval
+- Relationship Judge
+- Memory Lifecycle
+- Hybrid Memory Read
+- Dense Retrieval
+- BM25
+- RRF
+- Reranker
+- Relevance Judge
+- Memory Injection
+- Historical Retrieval
+- current / historical / both Query Scope
+
+**Completed**
+
+### v0.3 — PostgreSQL Runtime Baseline + Backend / LLM I/O Foundation
+
+- PostgreSQL 18 + psycopg3 runtime baseline
+- Async LLM I/O
+- SSE Streaming
+- Structured Output
+- Timeout
+- Retry
+- Error Handling V1
+- Basic Logging V1
+
+**Completed**
 
 ---
 
@@ -74,7 +125,21 @@ SQLAlchemy ORM           Memory Read / Write
         +----------+-----------+
                    |
                    v
-                  LLM
+              LLM Service
+                   |
+                   v
+        DeepSeek OpenAI-compatible API
+```
+
+LLM Service 是所有外部 LLM 调用的唯一出口，统一提供：
+
+```text
+Async
+SSE Streaming
+Structured Output
+Timeout
+Retry
+Error Handling
 ```
 
 Memory System 内部进一步拆分为：
@@ -94,14 +159,14 @@ Memory System 内部进一步拆分为：
              |                           |
         Exact Dedup                    Repository
              |                           |
-     Similarity Retrieval               |
-             |                    +------+------+
-   Relationship Judge             |             |
-             |                  Dense          BM25
-        Lifecycle                  |             |
-             |                    +------+------+
-             v                           |
-        SQLite Memory                     RRF
+     Related Retrieval          +------+------+
+             |                  |             |
+      Relationship Judge      Dense          BM25
+             |                  |             |
+        Lifecycle                +------+------+
+             |                           |
+             v                           v
+        PostgreSQL                    RRF
                                          |
                                      Reranker
                                          |
@@ -124,14 +189,18 @@ Memory System 内部进一步拆分为：
 - Python 3.12
 - FastAPI
 - SQLAlchemy
-- SQLite
 - Pydantic
 - Uvicorn
+
+### Database
+
+- PostgreSQL 18
+- psycopg3（SQLAlchemy driver：`postgresql+psycopg`）
 
 ### LLM
 
 - DeepSeek API
-- OpenAI-compatible SDK
+- OpenAI-compatible SDK（AsyncOpenAI）
 
 ### Embedding
 
@@ -173,12 +242,18 @@ AI_Agent_Platform
 │
 ├── backend
 │   │
+│   ├── config
+│   │   └── logging_config.py
+│   │
 │   ├── database
 │   │   ├── database.py
 │   │   └── migrations
 │   │
 │   ├── embedding
 │   │   └── embedder.py
+│   │
+│   ├── exceptions
+│   │   └── external_exceptions.py
 │   │
 │   ├── memory
 │   │   │
@@ -217,12 +292,16 @@ AI_Agent_Platform
 │   └── app.py
 │
 ├── tests
+│   ├── async
+│   ├── frontend
+│   ├── logging
 │   └── memory
 │
 ├── docs
 │   └── testing
 │
 ├── requirements.txt
+├── .env.example
 ├── .gitignore
 └── README.md
 ```
@@ -327,13 +406,132 @@ LLM 调用通过 Service Layer 统一封装。
 
 API Key 使用环境变量管理。
 
-例如：
+密钥不会直接写入代码仓库。
+
+---
+
+## LLM I/O Foundation（Stage 1）
+
+v0.3 完成 Backend + LLM I/O Foundation。
+
+所有能力集中在 `llm_service.py` 单一出口：
 
 ```text
-DEEPSEEK_API_KEY=your_key
+call_llm            → 一次性 Chat Completion
+stream_llm          → SSE Streaming Generator
+call_llm_structured → Structured Output（Pydantic Model）
 ```
 
-密钥不会直接写入代码仓库。
+### Async
+
+全部 LLM 调用基于 AsyncOpenAI，async / await 贯穿 Service 与 Router。
+
+---
+
+### SSE Streaming
+
+Chat 支持 Streaming 模式：
+
+```text
+POST /chat          → 一次性返回
+POST /chat/stream   → SSE 逐块返回
+```
+
+Streaming 过程中已生成的内容不会因为后续错误而丢失。
+
+---
+
+### Structured Output
+
+需要结构化输出的场景（Memory Extractor / Validator / Judge 等）
+统一使用 Structured Output：
+
+```text
+LLM Response
+    |
+    v
+Pydantic Model 解析
+    |
+    v
+类型安全的结构化结果
+```
+
+不再依赖手工 JSON 字符串解析。
+
+---
+
+### Timeout
+
+超时策略分层配置：
+
+```text
+Connect Timeout
+Read Timeout
+Write Timeout
+Pool Timeout
+Chat Overall Timeout
+Structured Overall Timeout
+```
+
+均为环境变量可配置。
+
+---
+
+### Retry
+
+LLM Client 显式配置最大重试次数。
+
+重试策略在 Service 层统一声明，不散落在各调用点。
+
+---
+
+### Error Handling V1
+
+统一异常层级：
+
+```text
+Exception
+    |
+    v
+ExternalServiceError
+    ├── ExternalTimeoutError
+    └── ExternalRequestError
+```
+
+OpenAI SDK 异常在 `llm_service` 边界统一翻译，
+不会泄漏到 Router / Frontend 层。
+
+Router 层固定映射：
+
+```text
+ExternalTimeoutError    → 504
+ExternalRequestError    → 500
+ExternalServiceError    → 503
+```
+
+---
+
+### Basic Logging V1
+
+```text
+业务模块 logging.getLogger(__name__)
+        |
+        v
+propagation → root
+        |
+        v
+统一格式输出
+```
+
+Memory 读写边界（Memory Boundary）统一记录 WARNING 级别日志，
+包含：
+
+- operation
+- user_id / conversation_id
+- fallback 行为
+- 原始异常信息
+
+日志不改变任何 Failure Contract，只增加可观测性。
 
 ---
 
@@ -410,13 +608,7 @@ MemoryCandidate
 用户计划深入学习 LangGraph 的 Agent Workflow
 ```
 
-Extractor 同时包含基础结构校验，例如：
-
-- LLM Response 非空
-- JSON 格式合法
-- `memories` 为 list
-- `content` 为合法字符串
-- `memory_type` 合法
+Extractor 基于 Structured Output 获取类型安全的结果。
 
 ---
 
@@ -546,13 +738,11 @@ historical
         ↓
 
 旧 Memory：
-
 historical
 
 新 Memory：
 
 用户已停止学习 C++
-
 current
 ```
 
@@ -805,9 +995,7 @@ Memory Context 还会明确告诉最终 LLM：
 
 ## Historical Memory Retrieval
 
-v0.2 新增 Historical Retrieval。
-
-系统不再固定只读取 current Memory。
+系统不固定只读取 current Memory。
 
 在 Memory Read 开始前：
 
@@ -1041,6 +1229,9 @@ MemoryReader
 
 ChatService
 → 只调用 MemoryReader
+
+llm_service
+→ 所有 LLM 调用的唯一出口
 ```
 
 因此：
@@ -1067,7 +1258,18 @@ Dense / BM25 / RRF / Reranker 也完全不知道 Memory Lifecycle。
 
 ## Testing
 
-Memory System 当前使用三类测试：
+tests/ 按领域组织：
+
+```text
+tests/
+│
+├── async      → LLM I/O 契约（Timeout / Retry / Error）
+├── frontend   → 前端错误语义契约
+├── logging    → 日志契约
+└── memory     → Memory Read / Write / Lifecycle
+```
+
+测试分为三类：
 
 ```text
 [KEEP]
@@ -1091,6 +1293,16 @@ Deterministic Regression Test。
 例如：
 
 ```text
+test_llm_error_contract.py
+
+test_llm_retry_contract.py
+
+test_llm_timeout_contract.py
+
+test_frontend_chat_error_contract.py
+
+test_chat_service_logging_contract.py
+
 test_memory_read_historical_scope.py
 
 test_memory_relevance_judge_status_contract.py
@@ -1108,7 +1320,7 @@ test_memory_write_state_change_regression.py
 
 可能使用：
 
-- SQLite
+- PostgreSQL
 - Qwen3 Embedding
 - BM25
 - bge-reranker
@@ -1143,7 +1355,7 @@ manual_historical_retrieval_v1.py
 
 ## Validation Documentation
 
-Memory System 的重要验证过程记录在：
+重要验证过程记录在：
 
 ```text
 docs/testing/
@@ -1157,6 +1369,8 @@ memory_read_v2_validation.md
 memory_lifecycle_v1_validation.md
 
 memory_read_historical_retrieval_v1_validation.md
+
+structured_output_query_scope_v1.md
 ```
 
 用于记录：
@@ -1182,6 +1396,7 @@ memory_read_historical_retrieval_v1_validation.md
 - 加载历史消息
 - 发送消息
 - AI Response 展示
+- Streaming / Non-Streaming 双模式
 
 当前已适配：
 
@@ -1240,6 +1455,8 @@ Windows：
 .venv\Scripts\Activate.ps1
 ```
 
+本项目使用 Python 3.12。
+
 ---
 
 ### 3. 安装依赖
@@ -1250,25 +1467,52 @@ pip install -r requirements.txt
 
 ---
 
-### 4. 配置环境变量
+### 4. 准备 PostgreSQL
 
-创建：
+准备一个可访问的 PostgreSQL 数据库（当前 baseline：PostgreSQL 18）。
+
+---
+
+### 5. 配置环境变量
+
+复制：
+
+```text
+.env.example
+```
+
+为：
 
 ```text
 .env
 ```
 
-配置：
+按需配置：
 
 ```text
-DEEPSEEK_API_KEY=your_key
+DEEPSEEK_API_KEY       DeepSeek API Key
+DEEPSEEK_BASE_URL      DeepSeek OpenAI-compatible Base URL
+DEFAULT_MODEL          默认对话模型
+
+EMBEDDING_MODEL_PATH   本地 Embedding 模型路径（Qwen3-Embedding-0.6B）
+RERANKER_MODEL_PATH    本地 Reranker 模型路径（BAAI/bge-reranker-v2-m3）
+
+DB_HOST                PostgreSQL 主机
+DB_PORT                PostgreSQL 端口
+DB_NAME                数据库名
+DB_USER                数据库用户
+DB_PASSWORD            数据库密码
 ```
+
+密钥与本地模型路径只存在于 `.env`，
+
+`.env` 已被 `.gitignore` 排除，不会进入仓库。
 
 ---
 
-### 5. 启动 FastAPI
+### 6. 启动 FastAPI
 
-```bash
+```powershell
 python -m uvicorn backend.main:app --reload
 ```
 
@@ -1280,9 +1524,9 @@ http://127.0.0.1:8000/docs
 
 ---
 
-### 6. 启动 Gradio
+### 7. 启动 Gradio
 
-```bash
+```powershell
 python frontend/app.py
 ```
 
@@ -1296,21 +1540,21 @@ http://127.0.0.1:7860
 
 ## 当前限制
 
-v0.2 当前仍然是学习和工程实践版本。
+当前仍然是学习和工程实践版本。
 
 暂未实现：
 
 - 用户登录认证
 - JWT / RBAC
-- PostgreSQL
-- pgvector
-- RAG Knowledge Base
+- pgvector（当前 Dense Retrieval 为进程内暴力检索）
+- Unified RAG Knowledge Base
 - 文件上传与文档解析
 - Tool Calling
+- Agent Loop
 - LangGraph Workflow
 - Multi-Agent Collaboration
 - Docker Deployment
-- Production Observability
+- 完整 Production Observability
 - 完整 Temporal Memory Timeline
 - Memory Version Graph
 - Goal Supersession
@@ -1384,71 +1628,16 @@ Question Presupposition
 
 ## Roadmap
 
-### v0.1
+### v0.4 — Stage 2: Unified RAG（NEXT）
 
-基础 Agent Chat Platform：
-
-- Agent
-- Conversation
-- Message
-- Agent Snapshot
-- DeepSeek
-- Gradio
-
-**Completed**
-
----
-
-### v0.2
-
-Long-term Memory System：
-
-- Memory Extraction
-- Memory Validation
-- Exact Dedup
-- Related Memory Retrieval
-- Relationship Judge
-- Memory Lifecycle
-- Hybrid Memory Read
-- Dense Retrieval
-- BM25
-- RRF
-- Reranker
-- Relevance Judge
-- Memory Injection
-- Historical Retrieval
-- current / historical / both Query Scope
-
-**Completed**
-
----
-
-## Next
-
-### PostgreSQL + pgvector
-
-将当前：
-
-```text
-SQLite
-+
-Brute-force Vector Retrieval
-```
-
-逐步演进到更加真实的数据库与向量检索架构。
-
----
-
-### RAG
-
-计划实现：
+将 Memory Retrieval 中验证过的 Hybrid 架构推广为统一 RAG 能力：
 
 - Document Upload
 - Parsing
 - Chunking
 - Embedding
 - Vector Retrieval
-- Hybrid Retrieval
+- Hybrid Retrieval（Dense + BM25 + RRF）
 - Reranking
 - Knowledge Context Injection
 
@@ -1460,14 +1649,26 @@ Brute-force Vector Retrieval
 
 ---
 
-### Agent Workflow
+### Agent Loop / Workflow
 
 进一步学习和实现：
 
+- Agent Loop
 - LangGraph
 - Workflow State
 - Multi-step Agent
 - Multi-Agent Collaboration
+
+---
+
+### Observability / Evaluation
+
+在 Basic Logging V1 之上继续演进：
+
+- Structured Logging
+- Tracing
+- Metrics
+- Evaluation
 
 ---
 
@@ -1482,18 +1683,27 @@ Brute-force Vector Retrieval
 
 ---
 
+### Deployment
+
+- Docker
+- Production Deployment
+
+---
+
 ## Version
 
 Current:
 
 ```text
-v0.2
+v0.3
 ```
 
 Core Milestone:
 
 ```text
-Long-term Memory System
+PostgreSQL Runtime Baseline
++
+Stage 1 — Backend + LLM I/O Foundation
 ```
 
 ---
