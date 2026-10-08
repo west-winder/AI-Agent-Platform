@@ -14,6 +14,9 @@ from backend.routers import model as model_router
 from backend.routers import user as user_router
 from backend.routers.memory import router as memory_router
 from backend.config.logging_config import configure_logging
+from backend.models import rag_document as rag_document_model
+from backend.models import rag_chunk as rag_chunk_model
+from backend.models import rag_chunk_embedding as rag_chunk_embedding_model
 
 # 配置日志
 configure_logging()

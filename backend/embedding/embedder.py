@@ -39,16 +39,15 @@ class Embedder:
 
         load_dotenv()
 
-        model_path = os.getenv(
-            "EMBEDDING_MODEL_PATH"
-        )
+        model_path = os.getenv("EMBEDDING_MODEL_PATH")
 
-        if not model_path:
-            model_path = "all-MiniLM-L6-v2"
-            print(
-                "[Embedder] 警告：未设置 EMBEDDING_MODEL_PATH，"
-                "回退到默认模型 all-MiniLM-L6-v2"
+        if not model_path or not model_path.strip():
+            raise ValueError(
+                "EMBEDDING_MODEL_PATH 未配置，"
+                "无法初始化 Embedding Model"
             )
+
+        model_path = model_path.strip()
 
         print(
             f"[Embedder] 正在加载模型：{model_path}"
@@ -56,6 +55,10 @@ class Embedder:
 
         self.model = SentenceTransformer(
             model_path
+        )
+
+        self._model_name = os.path.basename(
+            os.path.normpath(model_path)
         )
 
         print(
@@ -151,3 +154,9 @@ class Embedder:
         """
 
         return self.model.get_embedding_dimension()
+
+
+    @property
+    def model_name(self) -> str:
+        """返回当前加载模型的名称。"""
+        return self._model_name
