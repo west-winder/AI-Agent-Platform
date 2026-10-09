@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
@@ -7,9 +6,10 @@ from sqlalchemy import select
 
 from backend.database.database import SessionLocal
 from backend.models.rag_document import DocumentORM
-from backend.rag.ingestion.txt_loader import TXTLoader
 from backend.rag.ingestion.markdown_loader import MarkdownLoader
+from backend.rag.ingestion.pdf_loader import PDFLoader
 from backend.rag.ingestion.rag_ingestion import RAGIngestionService
+from backend.rag.ingestion.txt_loader import TXTLoader
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,7 @@ class FileIngestionService:
         session_factory=SessionLocal,
         txt_loader: TXTLoader | None = None,
         markdown_loader: MarkdownLoader | None = None,
+        pdf_loader: PDFLoader | None = None,
     ):
         self._ingestion = ingestion_service
         self._session_factory = session_factory
@@ -52,6 +53,7 @@ class FileIngestionService:
         self._markdown_loader = (
             markdown_loader or MarkdownLoader()
         )
+        self._pdf_loader = pdf_loader or PDFLoader()
 
     # ---------------------------------------
     # 1. 公共文件名校验
@@ -84,6 +86,9 @@ class FileIngestionService:
 
         if lower_name.endswith((".md", ".markdown")):
             return self._markdown_loader
+
+        if lower_name.endswith(".pdf"):
+            return self._pdf_loader
 
         raise ValueError("unsupported file type")
 
