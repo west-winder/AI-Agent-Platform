@@ -480,3 +480,78 @@ def test_pdf_duplicate_names(service):
     assert first.file_name == "rag.pdf"
     assert second.file_name == "rag(1).pdf"
     assert first.document_id != second.document_id
+
+
+
+# =========================================================
+# Phase 3.4 — Unified File Ingestion Entry Contract
+# =========================================================
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    [
+        "",
+        " bad.txt",
+        "../bad.txt",
+        r"C:\bad.txt",
+    ],
+)
+def test_unified_entry_rejects_invalid_file_name(
+    service,
+    file_name,
+):
+    entry, downstream = service
+
+    with pytest.raises(ValueError):
+        entry.ingest_file(
+            file_name=file_name,
+            file_bytes=b"ABC",
+            chunk_size=2,
+        )
+
+    assert downstream.calls == []
+
+
+def test_unified_entry_rejects_non_bytes(
+    service,
+):
+    entry, downstream = service
+
+    with pytest.raises(
+        TypeError,
+        match="file_bytes must be bytes",
+    ):
+        entry.ingest_file(
+            file_name="rag.txt",
+            file_bytes="ABC",
+            chunk_size=2,
+        )
+
+    assert downstream.calls == []
+
+
+@pytest.mark.parametrize(
+    "chunk_size",
+    [
+        0,
+        -1,
+    ],
+)
+def test_unified_entry_rejects_invalid_chunk_size(
+    service,
+    chunk_size,
+):
+    entry, downstream = service
+
+    with pytest.raises(
+        ValueError,
+        match="chunk_size must be greater than 0",
+    ):
+        entry.ingest_file(
+            file_name="rag.txt",
+            file_bytes=b"ABC",
+            chunk_size=chunk_size,
+        )
+
+    assert downstream.calls == []
