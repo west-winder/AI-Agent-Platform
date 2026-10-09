@@ -204,3 +204,67 @@ def test_invalid_chunk_size(service):
         entry.ingest_txt("rag.txt", b"ABC", 0)
 
     assert downstream.calls == []
+
+
+
+
+# Phase 3.2 — Unified TXT / Markdown Entry
+
+@pytest.mark.parametrize(
+    "file_name",
+    ["rag.md", "rag.markdown", "RAG.MD"],
+)
+def test_markdown_file_ingestion(service, file_name):
+    entry, downstream = service
+    text = "# RAG\n\n- Retrieval\n- Generation"
+
+    result = entry.ingest_file(
+        file_name=file_name,
+        file_bytes=text.encode("utf-8"),
+        chunk_size=100,
+    )
+
+    document, raw_text, _ = downstream.calls[0]
+
+    assert result.status == "success"
+    assert result.file_name == file_name
+    assert document.file_type == "markdown"
+    assert raw_text == text
+
+
+def test_unified_entry_supports_txt(service):
+    entry, downstream = service
+
+    result = entry.ingest_file("rag.txt", b"ABCDEF", 2)
+
+    assert result.status == "success"
+    assert downstream.calls[0][0].file_type == "txt"
+
+
+def test_markdown_duplicate_names(service):
+    entry, _ = service
+
+    first = entry.ingest_file("rag.md", b"# First", 100)
+    second = entry.ingest_file("rag.md", b"# Second", 100)
+
+    assert first.file_name == "rag.md"
+    assert second.file_name == "rag(1).md"
+    assert first.document_id != second.document_id
+
+
+def test_unsupported_format_rejected(service):
+    entry, downstream = service
+
+    with pytest.raises(ValueError, match="unsupported file type"):
+        entry.ingest_file("report.pdf", b"content", 100)
+
+    assert downstream.calls == []
+
+
+def test_legacy_txt_entry_rejects_markdown(service):
+    entry, downstream = service
+
+    with pytest.raises(ValueError, match="only .txt"):
+        entry.ingest_txt("rag.md", b"# RAG", 100)
+
+    assert downstream.calls == []
