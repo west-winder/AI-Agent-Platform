@@ -68,6 +68,56 @@ class DenseRetrieverResult(BaseModel):
         return value
 
 
+class BM25RetrieverResult(BaseModel):
+    """
+    BM25 Retriever 的检索与排序结果。
+
+    只表示：
+    - 命中了哪个 Chunk
+    - BM25 算法分数
+    - BM25 的业务排名（1-based）
+
+    不包含 content（Hydration 的职责），
+    也不包含任何 Embedding / Vector 信息。
+    """
+
+    chunk_id: str
+    bm25_score: float
+    bm25_rank: int
+
+    @field_validator("chunk_id")
+    @classmethod
+    def validate_chunk_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("chunk_id must not be blank")
+        return value
+
+
+class RetrievedCandidate(BaseModel):
+    """
+    Retrieval / Ranking 阶段交给 Hydration 阶段的统一候选。
+
+    它只承载 Hydration 真正需要的信息：
+
+    - 命中了哪个 Chunk
+    - 该 Chunk 在当前 Retrieval Ranking 中的业务排名（1-based）
+
+    不包含任何阶段专有分数（dense_score / bm25_score / rrf_score /
+    rerank_score ...），因此 Dense / Fusion / Reranker 任何一段的输出
+    都可以适配成 RetrievedCandidate，Hydrator 无需感知上游是哪个阶段。
+    """
+
+    chunk_id: str
+    rank: int
+
+    @field_validator("chunk_id")
+    @classmethod
+    def validate_chunk_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("chunk_id must not be blank")
+        return value
+
+
 class RagRetrievedChunk(BaseModel):
     """
     Retrieval + Ranking + Hydration 之后得到的完整 RAG 检索结果。
@@ -100,18 +150,34 @@ class RagRetrievedChunk(BaseModel):
 
 class FusedRetrieverResult(BaseModel):
     """
-    Hybrid Retrieval（Dense + BM25 -> RRF）融合结果的占位契约。
+    Hybrid Retrieval（Dense + BM25 -> RRF）融合结果。
 
-    当前只提供定义，不提供实现。
+    一个 Chunk 可能同时被 Dense 与 BM25 命中，
+    也可能只被其中一个命中。
+
+    因此 dense_* 与 bm25_* 字段允许缺失（None）：
+
+    - 只被 BM25 命中：dense_score = None, dense_rank = None
+    - 只被 Dense 命中：bm25_score = None, bm25_rank = None
+
+    不包含 content（Hydration 的职责），
+    也不包含任何 Embedding / Vector 信息。
     """
 
     chunk_id: str
-    dense_score: float
-    dense_rank: int
+    dense_score: float | None = None
+    dense_rank: int | None = None
     bm25_score: float | None = None
     bm25_rank: int | None = None
     rrf_score: float
     rrf_rank: int
+
+    @field_validator("chunk_id")
+    @classmethod
+    def validate_chunk_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("chunk_id must not be blank")
+        return value
 
 
 class RerankDocument(BaseModel):

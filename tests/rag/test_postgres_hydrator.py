@@ -9,7 +9,7 @@ from backend.models.rag_document import DocumentORM
 from backend.models.rag_chunk import ChunkORM
 from backend.models.rag_chunk_embedding import ChunkEmbeddingORM
 
-from backend.rag.contracts import DenseRetrieverResult
+from backend.rag.contracts import RetrievedCandidate
 from backend.rag.retrieval.repositories import (
     ChunkRepository,
     DocumentRepository,
@@ -168,26 +168,23 @@ def test_hydration_preserves_search_order(
         session_factory
     )
 
-    search_results = [
-        DenseRetrieverResult(
+    candidates = [
+        RetrievedCandidate(
             chunk_id="chunk_3",
-            dense_score=0.95,
-            dense_rank=1,
+            rank=1,
         ),
-        DenseRetrieverResult(
+        RetrievedCandidate(
             chunk_id="chunk_1",
-            dense_score=0.90,
-            dense_rank=2,
+            rank=2,
         ),
-        DenseRetrieverResult(
+        RetrievedCandidate(
             chunk_id="chunk_2",
-            dense_score=0.80,
-            dense_rank=3,
+            rank=3,
         ),
     ]
 
     results = hydrator.hydrate(
-        search_results
+        candidates
     )
 
     assert [
@@ -243,16 +240,14 @@ def test_missing_chunk_raises(
         session_factory
     )
 
-    search_results = [
-        DenseRetrieverResult(
+    candidates = [
+        RetrievedCandidate(
             chunk_id="chunk_1",
-            dense_score=0.9,
-            dense_rank=1,
+            rank=1,
         ),
-        DenseRetrieverResult(
+        RetrievedCandidate(
             chunk_id="missing_chunk",
-            dense_score=0.8,
-            dense_rank=2,
+            rank=2,
         ),
     ]
 
@@ -261,7 +256,7 @@ def test_missing_chunk_raises(
         match="missing chunks",
     ):
         hydrator.hydrate(
-            search_results
+            candidates
         )
 
 
@@ -300,11 +295,10 @@ def test_missing_document_raises(
         ),
     )
 
-    search_results = [
-        DenseRetrieverResult(
+    candidates = [
+        RetrievedCandidate(
             chunk_id="chunk_1",
-            dense_score=0.9,
-            dense_rank=1,
+            rank=1,
         ),
     ]
 
@@ -313,5 +307,5 @@ def test_missing_document_raises(
         match="missing documents",
     ):
         hydrator.hydrate(
-            search_results
+            candidates
         )

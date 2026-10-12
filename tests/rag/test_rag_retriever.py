@@ -5,8 +5,16 @@ from backend.rag.contracts import (
     Chunk,
     Document,
 )
+from backend.rag.retrieval.bm25_retriever import BM25Retriever
 from backend.rag.retrieval.exact_search import ExactDenseSearch
+from backend.rag.retrieval.fusion import RRFFusion
 from backend.rag.retrieval.hydrator import RAGHydrator
+from backend.rag.retrieval.rerank_document_builder import (
+    RerankDocumentBuilder,
+)
+from backend.rag.retrieval.reranker_adapter import (
+    RerankerAdapter,
+)
 from backend.rag.retrieval.retriever import RAGRetriever
 
 
@@ -31,24 +39,72 @@ class FailingEmbedder:
         raise RuntimeError("embedding failed")
 
 
+class FakeRerankItem:
+    """
+    模拟 backend.reranking.reranker.RerankResult 的字段契约。
+    """
+
+    def __init__(self, index, score):
+        self.index = index
+        self.score = score
+
+
+class PreservingReranker:
+    """
+    测试专用底层 Reranker：保持输入顺序。
+
+    真实 Cross Encoder Reranker 需要本地模型文件，
+    因此编排测试注入 Fake，
+    让测试只关注 Pipeline 结构。
+    """
+
+    def __init__(self):
+        self.received_query = None
+        self.received_texts = None
+
+    def rerank(self, query, texts):
+        self.received_query = query
+        self.received_texts = list(texts)
+
+        return [
+            FakeRerankItem(
+                index=index,
+                score=1.0 / (index + 1),
+            )
+            for index, text in enumerate(texts)
+        ]
+
+
+def build_retriever(embedder) -> RAGRetriever:
+    return RAGRetriever(
+        embedder=embedder,
+        exact_search=ExactDenseSearch(),
+        bm25_retriever=BM25Retriever(),
+        fusion=RRFFusion(),
+        rerank_document_builder=RerankDocumentBuilder(),
+        reranker=RerankerAdapter(PreservingReranker()),
+        hydrator=RAGHydrator(),
+    )
+
+
 def test_retrieve_runs_complete_retrieval_pipeline():
     """
     Query
         ↓
     Embedding
         ↓
-    Exact Search
+    Dense Retrieval + BM25 Retrieval
+        ↓
+    Fusion(RRF)
+        ↓
+    Rerank
         ↓
     Hydration
         ↓
     RagRetrievedChunk[]
     """
 
-    retriever = RAGRetriever(
-        embedder=FakeEmbedder(),
-        exact_search=ExactDenseSearch(),
-        hydrator=RAGHydrator(),
-    )
+    retriever = build_retriever(FakeEmbedder())
 
     chunk_store = {
         "chunk_1": Chunk(
@@ -101,11 +157,7 @@ def test_retrieve_empty_corpus_returns_empty_list():
     Empty Corpus 最终应该正常得到 Empty Retrieval。
     """
 
-    retriever = RAGRetriever(
-        embedder=FakeEmbedder(),
-        exact_search=ExactDenseSearch(),
-        hydrator=RAGHydrator(),
-    )
+    retriever = build_retriever(FakeEmbedder())
 
     results = retriever.retrieve(
         query="test query",
@@ -123,11 +175,7 @@ def test_retrieve_propagates_embedding_failure():
     RAGRetriever 不吞掉 Embedding Failure。
     """
 
-    retriever = RAGRetriever(
-        embedder=FailingEmbedder(),
-        exact_search=ExactDenseSearch(),
-        hydrator=RAGHydrator(),
-    )
+    retriever = build_retriever(FailingEmbedder())
 
     with pytest.raises(
         RuntimeError,
@@ -142,16 +190,18 @@ def test_retrieve_propagates_embedding_failure():
         )
 
 
-def test_retrieve_propagates_hydration_failure():
+def test_retrieve_propagates_consistency_failure():
     """
-    Hydration 的数据一致性错误必须继续向上传播。
+    候选指向不存在的 Chunk：
+
+    属于 Retrieval / Storage 数据一致性错误，
+    必须继续向上传播。
+
+    Pipeline 重排后，该错误在进入 Hydration 之前
+    就会在 RerankDocumentBuilder 边界暴露。
     """
 
-    retriever = RAGRetriever(
-        embedder=FakeEmbedder(),
-        exact_search=ExactDenseSearch(),
-        hydrator=RAGHydrator(),
-    )
+    retriever = build_retriever(FakeEmbedder())
 
     chunk_vectors = {
         "missing_chunk": np.array([1.0, 0.0]),

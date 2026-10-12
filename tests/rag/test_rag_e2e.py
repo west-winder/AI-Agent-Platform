@@ -12,8 +12,16 @@ from backend.rag.contracts import (
 )
 from backend.rag.ingestion.chunk_embedding import build_chunk_vectors
 from backend.rag.ingestion.chunker import chunk_document
+from backend.rag.retrieval.bm25_retriever import BM25Retriever
 from backend.rag.retrieval.exact_search import ExactDenseSearch
+from backend.rag.retrieval.fusion import RRFFusion
 from backend.rag.retrieval.hydrator import RAGHydrator
+from backend.rag.retrieval.rerank_document_builder import (
+    RerankDocumentBuilder,
+)
+from backend.rag.retrieval.reranker_adapter import (
+    RerankerAdapter,
+)
 from backend.rag.retrieval.retriever import RAGRetriever
 
 
@@ -42,10 +50,42 @@ class FakeE2EEmbedder:
         return self.QUERY_VECTORS[text]
 
 
+class FakeRerankItem:
+    """
+    模拟 backend.reranking.reranker.RerankResult 的字段契约。
+    """
+
+    def __init__(self, index, score):
+        self.index = index
+        self.score = score
+
+
+class PreservingReranker:
+    """
+    测试专用底层 Reranker：保持输入顺序。
+
+    真实 Cross Encoder Reranker 需要本地模型文件，
+    因此 E2E 测试注入 Fake，只验证 Pipeline 编排。
+    """
+
+    def rerank(self, query, texts):
+        return [
+            FakeRerankItem(
+                index=index,
+                score=1.0 / (index + 1),
+            )
+            for index, text in enumerate(texts)
+        ]
+
+
 def build_retriever(embedder: FakeE2EEmbedder) -> RAGRetriever:
     return RAGRetriever(
         embedder=embedder,
         exact_search=ExactDenseSearch(),
+        bm25_retriever=BM25Retriever(),
+        fusion=RRFFusion(),
+        rerank_document_builder=RerankDocumentBuilder(),
+        reranker=RerankerAdapter(PreservingReranker()),
         hydrator=RAGHydrator(),
     )
 

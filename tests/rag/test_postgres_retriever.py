@@ -59,13 +59,13 @@ class FakeVectorSearch:
 class FakeHydrator:
 
     def __init__(self):
-        self.received_search_results = None
+        self.received_candidates = None
 
     def hydrate(
         self,
-        search_results,
+        candidates,
     ):
-        self.received_search_results = search_results
+        self.received_candidates = candidates
 
         return [
             RagRetrievedChunk(
@@ -124,13 +124,22 @@ def test_retriever_orchestration():
     # top_k 正确传递
     assert vector_search.received_top_k == 2
 
-    # DenseRetrieverResult[] -> Hydrator
+    # DenseRetrieverResult[] -> RetrievedCandidate[] -> Hydrator
     assert [
         item.chunk_id
-        for item in hydrator.received_search_results
+        for item in hydrator.received_candidates
     ] == [
         "chunk_2",
         "chunk_1",
+    ]
+
+    # dense_rank 必须被适配成候选的业务排名
+    assert [
+        item.rank
+        for item in hydrator.received_candidates
+    ] == [
+        1,
+        2,
     ]
 
     # 最终 RagRetrievedChunk[]
@@ -161,13 +170,13 @@ class EmptyVectorSearch:
 class EmptyHydrator:
 
     def __init__(self):
-        self.received_search_results = None
+        self.received_candidates = None
 
     def hydrate(
         self,
-        search_results,
+        candidates,
     ):
-        self.received_search_results = search_results
+        self.received_candidates = candidates
         return []
 
 
@@ -186,7 +195,7 @@ def test_empty_retrieval():
         top_k=5,
     )
 
-    assert hydrator.received_search_results == []
+    assert hydrator.received_candidates == []
     assert results == []
 
 
@@ -211,7 +220,7 @@ class ForbiddenHydrator:
 
     def hydrate(
         self,
-        search_results,
+        candidates,
     ):
         raise AssertionError(
             "Hydrator must not run after search failure"

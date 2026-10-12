@@ -1,6 +1,6 @@
 from backend.rag.contracts import (
-    DenseRetrieverResult,
     RagRetrievedChunk,
+    RetrievedCandidate,
 )
 from backend.rag.retrieval.repositories import (
     ChunkRepository,
@@ -10,11 +10,13 @@ from backend.rag.retrieval.repositories import (
 
 class PostgreSQLHydrator:
     """
-    Persistent RAG Hydration 组件。
+    Persistent RAG Retrieval Pipeline 的 Hydration Stage。
+
+    它是流水线的最后一个转换阶段。
 
     职责：
 
-    DenseRetrieverResult[]
+    RetrievedCandidate[]
         ↓
     ChunkRepository 批量查询 Chunk
         ↓
@@ -22,15 +24,15 @@ class PostgreSQLHydrator:
         ↓
     一致性检查
         ↓
-    按 DenseRetrieverResult 顺序恢复 Ranking
+    按 RetrievedCandidate 顺序恢复 Ranking
         ↓
     RagRetrievedChunk[]
 
     不负责：
     - Query Embedding
-    - Vector Search
+    - Retrieval（Dense / Sparse）
     - SQL 查询细节
-    - Ranking 算法
+    - Ranking 算法（不重排、不算分）
     - Context Assembly
     - LLM Generation
     """
@@ -45,23 +47,23 @@ class PostgreSQLHydrator:
 
     def hydrate(
         self,
-        search_results: list[DenseRetrieverResult],
+        candidates: list[RetrievedCandidate],
     ) -> list[RagRetrievedChunk]:
 
         # ==========================================
         # 1. Empty Retrieval 是合法状态
         # ==========================================
 
-        if not search_results:
+        if not candidates:
             return []
 
         # ==========================================
-        # 2. 提取 DenseRetrieverResult 中的 chunk_id
+        # 2. 提取 RetrievedCandidate 中的 chunk_id
         # ==========================================
 
         chunk_ids = [
-            result.chunk_id
-            for result in search_results
+            candidate.chunk_id
+            for candidate in candidates
         ]
 
         # ==========================================
@@ -90,7 +92,7 @@ class PostgreSQLHydrator:
         if missing_chunk_ids:
             raise KeyError(
                 "Hydration failed: "
-                "DenseRetrieverResult references missing chunks: "
+                "RetrievedCandidate references missing chunks: "
                 f"{missing_chunk_ids}"
             )
 
@@ -141,10 +143,10 @@ class PostgreSQLHydrator:
 
         retrieved_chunks: list[RagRetrievedChunk] = []
 
-        for search_result in search_results:
+        for candidate in candidates:
 
             chunk = chunk_by_id[
-                search_result.chunk_id
+                candidate.chunk_id
             ]
 
             document = document_by_id[
@@ -157,7 +159,7 @@ class PostgreSQLHydrator:
                     document_id=chunk.document_id,
                     content=chunk.content,
                     source=document.file_name,
-                    retrieval_rank=search_result.dense_rank,
+                    retrieval_rank=candidate.rank,
                 )
             )
 
