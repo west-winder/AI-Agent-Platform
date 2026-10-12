@@ -1,3 +1,19 @@
+"""
+PostgreSQL DenseRetriever 后端测试。
+
+被测组件：backend.rag.retrieval.postgres_vector_search.PostgreSQLVectorSearch
+（DenseRetriever Contract 的持久化实现）。
+
+覆盖：
+
+1. Exact Search + Ranking + Score
+2. Top-K
+3. Empty Corpus
+4. Embedding Model 不匹配（EmbeddingCompatibilityError）
+5. Embedding Model 过滤
+6. Vector 维度不匹配（DBAPIError）
+7. 构造期 embedding_model 校验（纯 Python）
+"""
 
 import os
 import uuid
@@ -11,7 +27,7 @@ from backend.database.database import Base, engine
 from backend.models.rag_document import DocumentORM
 from backend.models.rag_chunk import ChunkORM
 from backend.models.rag_chunk_embedding import ChunkEmbeddingORM
-from backend.rag.retrieval.dense_retriever import (
+from backend.rag.retrieval.postgres_vector_search import (
     EmbeddingCompatibilityError,
     PostgreSQLVectorSearch,
 )
@@ -131,11 +147,13 @@ def seed_vectors(factory):
 def test_exact_search_ranking(session_factory):
     seed_vectors(session_factory)
 
-    search = PostgreSQLVectorSearch(session_factory)
+    search = PostgreSQLVectorSearch(
+        embedding_model="model-A",
+        session_factory=session_factory,
+    )
 
     results = search.search(
         query_vector=np.array([1.0, 0.0, 0.0]),
-        embedding_model="model-A",
         top_k=3,
     )
 
@@ -160,11 +178,13 @@ def test_exact_search_ranking(session_factory):
 def test_top_k(session_factory):
     seed_vectors(session_factory)
 
-    search = PostgreSQLVectorSearch(session_factory)
+    search = PostgreSQLVectorSearch(
+        embedding_model="model-A",
+        session_factory=session_factory,
+    )
 
     results = search.search(
         query_vector=np.array([1.0, 0.0, 0.0]),
-        embedding_model="model-A",
         top_k=2,
     )
 
@@ -180,11 +200,13 @@ def test_top_k(session_factory):
 # ==================================================
 
 def test_empty_corpus(session_factory):
-    search = PostgreSQLVectorSearch(session_factory)
+    search = PostgreSQLVectorSearch(
+        embedding_model="model-A",
+        session_factory=session_factory,
+    )
 
     results = search.search(
         query_vector=np.array([1.0, 0.0, 0.0]),
-        embedding_model="model-A",
         top_k=5,
     )
 
@@ -198,12 +220,14 @@ def test_empty_corpus(session_factory):
 def test_model_mismatch(session_factory):
     seed_vectors(session_factory)
 
-    search = PostgreSQLVectorSearch(session_factory)
+    search = PostgreSQLVectorSearch(
+        embedding_model="model-B",
+        session_factory=session_factory,
+    )
 
     with pytest.raises(EmbeddingCompatibilityError):
         search.search(
             query_vector=np.array([1.0, 0.0, 0.0]),
-            embedding_model="model-B",
             top_k=5,
         )
 
@@ -243,11 +267,13 @@ def test_model_filtering(session_factory):
             )
         )
 
-    search = PostgreSQLVectorSearch(session_factory)
+    search = PostgreSQLVectorSearch(
+        embedding_model="model-A",
+        session_factory=session_factory,
+    )
 
     results = search.search(
         query_vector=np.array([1.0, 0.0, 0.0]),
-        embedding_model="model-A",
         top_k=10,
     )
 
@@ -264,20 +290,52 @@ def test_model_filtering(session_factory):
 def test_dimension_mismatch_propagates(session_factory):
     seed_vectors(session_factory)
 
-    search = PostgreSQLVectorSearch(session_factory)
+    search = PostgreSQLVectorSearch(
+        embedding_model="model-A",
+        session_factory=session_factory,
+    )
 
     # 数据库向量为 3 维，Query 为 2 维
     # PostgreSQL 应报告维度不匹配
     with pytest.raises(DBAPIError):
         search.search(
             query_vector=np.array([1.0, 0.0]),
-            embedding_model="model-A",
             top_k=3,
         )
 
 
 # ==================================================
-# Case 7：Invalid Arguments（纯 Python）
+# Case 7：Invalid Embedding Model（构造期校验）
+# ==================================================
+
+@pytest.mark.parametrize(
+    "embedding_model, error_type",
+    [
+        ("", ValueError),
+        ("   ", ValueError),
+        (None, ValueError),
+        (123, ValueError),
+    ],
+)
+def test_invalid_embedding_model(
+    embedding_model,
+    error_type,
+):
+
+    def forbidden_session_factory():
+        raise AssertionError(
+            "Invalid input must not access database"
+        )
+
+    with pytest.raises(error_type):
+        PostgreSQLVectorSearch(
+            embedding_model=embedding_model,
+            session_factory=forbidden_session_factory,
+        )
+
+
+# ==================================================
+# Case 8：Invalid Arguments（纯 Python）
 # ==================================================
 
 @pytest.mark.parametrize(
@@ -285,7 +343,6 @@ def test_dimension_mismatch_propagates(session_factory):
     [
         ({"top_k": 0}, ValueError),
         ({"top_k": True}, TypeError),
-        ({"embedding_model": ""}, ValueError),
         ({"query_vector": np.array([])}, ValueError),
         ({"query_vector": np.array([0.0, 0.0])}, ValueError),
         ({"query_vector": np.array([np.nan, 1.0])}, ValueError),
@@ -301,12 +358,12 @@ def test_invalid_arguments(overrides, error_type):
         )
 
     search = PostgreSQLVectorSearch(
-        forbidden_session_factory
+        embedding_model="model-A",
+        session_factory=forbidden_session_factory,
     )
 
     arguments = {
         "query_vector": np.array([1.0, 0.0, 0.0]),
-        "embedding_model": "model-A",
         "top_k": 5,
     }
     arguments.update(overrides)

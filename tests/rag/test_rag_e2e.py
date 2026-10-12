@@ -15,7 +15,6 @@ from backend.rag.ingestion.chunker import chunk_document
 from backend.rag.retrieval.bm25_retriever import BM25Retriever
 from backend.rag.retrieval.exact_search import ExactDenseSearch
 from backend.rag.retrieval.fusion import RRFFusion
-from backend.rag.retrieval.hydrator import RAGHydrator
 from backend.rag.retrieval.rerank_document_builder import (
     RerankDocumentBuilder,
 )
@@ -23,6 +22,8 @@ from backend.rag.retrieval.reranker_adapter import (
     RerankerAdapter,
 )
 from backend.rag.retrieval.retriever import RAGRetriever
+
+from inmemory_repositories import build_inmemory_hydrator
 
 
 class FakeE2EEmbedder:
@@ -78,15 +79,25 @@ class PreservingReranker:
         ]
 
 
-def build_retriever(embedder: FakeE2EEmbedder) -> RAGRetriever:
+def build_retriever(
+    embedder: FakeE2EEmbedder,
+    chunk_vectors: dict,
+    chunk_store: dict,
+    document_store: dict,
+) -> RAGRetriever:
     return RAGRetriever(
         embedder=embedder,
-        exact_search=ExactDenseSearch(),
+        dense_retriever=ExactDenseSearch(
+            chunk_vectors
+        ),
         bm25_retriever=BM25Retriever(),
         fusion=RRFFusion(),
         rerank_document_builder=RerankDocumentBuilder(),
         reranker=RerankerAdapter(PreservingReranker()),
-        hydrator=RAGHydrator(),
+        hydrator=build_inmemory_hydrator(
+            chunk_store,
+            document_store,
+        ),
     )
 
 
@@ -107,11 +118,22 @@ def test_phase_2a_e2e_happy_path(monkeypatch):
         chunks=chunks,
         embedder=embedder,
     )
-    retrieved_chunks = build_retriever(embedder).retrieve(
+    chunk_store = {
+        chunk.chunk_id: chunk
+        for chunk in chunks
+    }
+    document_store = {
+        document.document_id: document
+    }
+
+    retrieved_chunks = build_retriever(
+        embedder,
+        chunk_vectors,
+        chunk_store,
+        document_store,
+    ).retrieve(
         query="find BBBBB",
-        chunk_vectors=chunk_vectors,
-        chunk_store={chunk.chunk_id: chunk for chunk in chunks},
-        document_store={document.document_id: document},
+        chunk_store=chunk_store,
         top_k=2,
     )
     assembled_context = ContextAssembler().assemble(retrieved_chunks)
@@ -182,11 +204,14 @@ def test_phase_2a_e2e_empty_knowledge_path(monkeypatch):
         chunks=chunks,
         embedder=embedder,
     )
-    retrieved_chunks = build_retriever(embedder).retrieve(
+    retrieved_chunks = build_retriever(
+        embedder,
+        chunk_vectors,
+        {},
+        {document.document_id: document},
+    ).retrieve(
         query="empty query",
-        chunk_vectors=chunk_vectors,
         chunk_store={},
-        document_store={document.document_id: document},
         top_k=5,
     )
     assembled_context = ContextAssembler().assemble(retrieved_chunks)
@@ -243,11 +268,22 @@ def test_phase_2a_e2e_citation_handoff(monkeypatch):
         chunks=chunks,
         embedder=embedder,
     )
-    retrieved_chunks = build_retriever(embedder).retrieve(
+    chunk_store = {
+        chunk.chunk_id: chunk
+        for chunk in chunks
+    }
+    document_store = {
+        document.document_id: document
+    }
+
+    retrieved_chunks = build_retriever(
+        embedder,
+        chunk_vectors,
+        chunk_store,
+        document_store,
+    ).retrieve(
         query="find CCCCC",
-        chunk_vectors=chunk_vectors,
-        chunk_store={chunk.chunk_id: chunk for chunk in chunks},
-        document_store={document.document_id: document},
+        chunk_store=chunk_store,
         top_k=1,
     )
     assembled_context = ContextAssembler().assemble(retrieved_chunks)

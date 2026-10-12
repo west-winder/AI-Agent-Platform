@@ -4,14 +4,13 @@ from backend.rag.contracts import (
     BM25RetrieverResult,
     Chunk,
     DenseRetrieverResult,
-    Document,
     FusedRetrieverResult,
     RagRetrievedChunk,
     RerankedResult,
     RetrievedCandidate,
 )
 from backend.rag.retrieval.bm25_retriever import BM25Retriever
-from backend.rag.retrieval.exact_search import ExactDenseSearch
+from backend.rag.retrieval.dense_retriever import DenseRetriever
 from backend.rag.retrieval.fusion import RRFFusion
 from backend.rag.retrieval.hydrator import RAGHydrator
 from backend.rag.retrieval.rerank_document_builder import (
@@ -24,7 +23,7 @@ from backend.rag.retrieval.reranker_adapter import (
 
 class RAGRetriever:
     """
-    RAG Hybrid Retrieval Pipeline 的 Orchestrator。
+    RAG Retrieval Pipeline 的唯一 Orchestrator。
 
     Pipeline Stages：
 
@@ -53,6 +52,14 @@ class RAGRetriever:
 
     本组件只负责编排 Retrieval Pipeline。
 
+    Dense 路径通过 DenseRetriever Contract 注入：
+
+    - In-Memory 语料 -> ExactDenseSearch
+    - PostgreSQL    -> PostgreSQLVectorSearch
+
+    因此 storage 实现（dict / PostgreSQL）只存在于
+    被注入的组件里，Retrieval Layer 不存在第二套 Pipeline。
+
     不负责：
 
     1. Embedding 算法实现
@@ -63,15 +70,12 @@ class RAGRetriever:
     6. Hydration 细节
     7. Context Assembly
     8. LLM Generation
-
-    它没有第二套 Hybrid Pipeline：
-    Sparse Retrieval / Fusion / Rerank 都是本 Pipeline 的阶段。
     """
 
     def __init__(
         self,
         embedder,
-        exact_search: ExactDenseSearch,
+        dense_retriever: DenseRetriever,
         bm25_retriever: BM25Retriever,
         fusion: RRFFusion,
         rerank_document_builder: RerankDocumentBuilder,
@@ -83,7 +87,7 @@ class RAGRetriever:
         """
 
         self._embedder = embedder
-        self._exact_search = exact_search
+        self._dense_retriever = dense_retriever
         self._bm25_retriever = bm25_retriever
         self._fusion = fusion
         self._rerank_document_builder = (
@@ -95,9 +99,7 @@ class RAGRetriever:
     def retrieve(
         self,
         query: str,
-        chunk_vectors: dict[str, np.ndarray],
         chunk_store: dict[str, Chunk],
-        document_store: dict[str, Document],
         top_k: int = 5,
     ) -> list[RagRetrievedChunk]:
         """
@@ -120,7 +122,6 @@ class RAGRetriever:
 
         dense_results = self._dense_retrieve_candidates(
             query_vector=query_vector,
-            chunk_vectors=chunk_vectors,
             top_k=top_k,
         )
 
@@ -175,8 +176,6 @@ class RAGRetriever:
 
         return self._hydrate(
             candidates=candidates,
-            chunk_store=chunk_store,
-            document_store=document_store,
         )
 
     def _embed_query(
@@ -192,7 +191,6 @@ class RAGRetriever:
     def _dense_retrieve_candidates(
         self,
         query_vector: np.ndarray,
-        chunk_vectors: dict[str, np.ndarray],
         top_k: int,
     ) -> list[DenseRetrieverResult]:
         """
@@ -200,12 +198,12 @@ class RAGRetriever:
 
         与 _retrieve_sparse_candidates 命名对称。
 
-        当前 Dense 路径内部使用 Dense Retrieval。
+        Dense 语料与算法都在注入的 DenseRetriever 内部，
+        RAGRetriever 只按 Contract 调用。
         """
 
-        return self._exact_search.search(
+        return self._dense_retriever.search(
             query_vector=query_vector,
-            chunk_vectors=chunk_vectors,
             top_k=top_k,
         )
 
@@ -287,15 +285,14 @@ class RAGRetriever:
     def _hydrate(
         self,
         candidates: list[RetrievedCandidate],
-        chunk_store: dict[str, Chunk],
-        document_store: dict[str, Document],
     ) -> list[RagRetrievedChunk]:
         """
         Hydration Stage：把候选恢复成完整 RagRetrievedChunk[]。
+
+        Hydrator 只依赖 Repository Contract，
+        因此 Retriever 不再向它传递内存语料。
         """
 
         return self._hydrator.hydrate(
             candidates=candidates,
-            chunk_store=chunk_store,
-            document_store=document_store,
         )

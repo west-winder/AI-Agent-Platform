@@ -8,7 +8,6 @@ from backend.rag.contracts import (
 from backend.rag.retrieval.bm25_retriever import BM25Retriever
 from backend.rag.retrieval.exact_search import ExactDenseSearch
 from backend.rag.retrieval.fusion import RRFFusion
-from backend.rag.retrieval.hydrator import RAGHydrator
 from backend.rag.retrieval.rerank_document_builder import (
     RerankDocumentBuilder,
 )
@@ -16,6 +15,8 @@ from backend.rag.retrieval.reranker_adapter import (
     RerankerAdapter,
 )
 from backend.rag.retrieval.retriever import RAGRetriever
+
+from inmemory_repositories import build_inmemory_hydrator
 
 
 class FakeEmbedder:
@@ -75,15 +76,34 @@ class PreservingReranker:
         ]
 
 
-def build_retriever(embedder) -> RAGRetriever:
+def build_retriever(
+    embedder,
+    chunk_vectors,
+    chunk_store,
+    document_store,
+) -> RAGRetriever:
+    """
+    Dense 路径注入 DenseRetriever Contract 的内存实现。
+
+    Hydrator 只依赖 Repository Contract：
+
+    测试注入 InMemory Repository，
+    生产注入 PostgreSQL Repository。
+    """
+
     return RAGRetriever(
         embedder=embedder,
-        exact_search=ExactDenseSearch(),
+        dense_retriever=ExactDenseSearch(
+            chunk_vectors
+        ),
         bm25_retriever=BM25Retriever(),
         fusion=RRFFusion(),
         rerank_document_builder=RerankDocumentBuilder(),
         reranker=RerankerAdapter(PreservingReranker()),
-        hydrator=RAGHydrator(),
+        hydrator=build_inmemory_hydrator(
+            chunk_store,
+            document_store,
+        ),
     )
 
 
@@ -103,8 +123,6 @@ def test_retrieve_runs_complete_retrieval_pipeline():
         ↓
     RagRetrievedChunk[]
     """
-
-    retriever = build_retriever(FakeEmbedder())
 
     chunk_store = {
         "chunk_1": Chunk(
@@ -137,11 +155,16 @@ def test_retrieve_runs_complete_retrieval_pipeline():
         "chunk_2": np.array([1.0, 0.0]),
     }
 
+    retriever = build_retriever(
+        FakeEmbedder(),
+        chunk_vectors,
+        chunk_store,
+        document_store,
+    )
+
     results = retriever.retrieve(
         query="test query",
-        chunk_vectors=chunk_vectors,
         chunk_store=chunk_store,
-        document_store=document_store,
         top_k=1,
     )
 
@@ -157,13 +180,16 @@ def test_retrieve_empty_corpus_returns_empty_list():
     Empty Corpus 最终应该正常得到 Empty Retrieval。
     """
 
-    retriever = build_retriever(FakeEmbedder())
+    retriever = build_retriever(
+        FakeEmbedder(),
+        {},
+        {},
+        {},
+    )
 
     results = retriever.retrieve(
         query="test query",
-        chunk_vectors={},
         chunk_store={},
-        document_store={},
         top_k=5,
     )
 
@@ -175,7 +201,12 @@ def test_retrieve_propagates_embedding_failure():
     RAGRetriever 不吞掉 Embedding Failure。
     """
 
-    retriever = build_retriever(FailingEmbedder())
+    retriever = build_retriever(
+        FailingEmbedder(),
+        {},
+        {},
+        {},
+    )
 
     with pytest.raises(
         RuntimeError,
@@ -183,9 +214,7 @@ def test_retrieve_propagates_embedding_failure():
     ):
         retriever.retrieve(
             query="test query",
-            chunk_vectors={},
             chunk_store={},
-            document_store={},
             top_k=5,
         )
 
@@ -201,17 +230,20 @@ def test_retrieve_propagates_consistency_failure():
     就会在 RerankDocumentBuilder 边界暴露。
     """
 
-    retriever = build_retriever(FakeEmbedder())
-
     chunk_vectors = {
         "missing_chunk": np.array([1.0, 0.0]),
     }
 
+    retriever = build_retriever(
+        FakeEmbedder(),
+        chunk_vectors,
+        {},
+        {},
+    )
+
     with pytest.raises(KeyError):
         retriever.retrieve(
             query="test query",
-            chunk_vectors=chunk_vectors,
             chunk_store={},
-            document_store={},
             top_k=1,
         )

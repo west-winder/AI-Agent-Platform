@@ -1,3 +1,17 @@
+"""
+RAGRetriever + PostgreSQL Dense backend + Hydrator 的 Pipeline 测试。
+
+验证唯一 Orchestrator（RAGRetriever）在持久化形态下的完整接线：
+
+    Persistent Ingestion
+        ↓
+    RAGRetriever
+        ├─ dense_retriever = PostgreSQLVectorSearch（DenseRetriever 持久化实现）
+        └─ hydrator        = RAGHydrator（PostgreSQL Repository）
+
+默认 skip：需要 RUN_RAG_PERSISTENT_E2E=1 与真实 PostgreSQL。
+"""
+
 import os
 import uuid
 
@@ -14,19 +28,25 @@ from backend.rag.contracts import Document
 from backend.rag.ingestion.rag_ingestion import (
     RAGIngestionService,
 )
-from backend.rag.retrieval.dense_retriever import (
+from backend.rag.retrieval.bm25_retriever import (
+    BM25Retriever,
+)
+from backend.rag.retrieval.fusion import RRFFusion
+from backend.rag.retrieval.hydrator import RAGHydrator
+from backend.rag.retrieval.postgres_vector_search import (
     PostgreSQLVectorSearch,
 )
 from backend.rag.retrieval.repositories import (
     ChunkRepository,
     DocumentRepository,
 )
-from backend.rag.retrieval.postgres_hydrator import (
-    PostgreSQLHydrator,
+from backend.rag.retrieval.rerank_document_builder import (
+    RerankDocumentBuilder,
 )
-from backend.rag.retrieval.postgres_retriever import (
-    PostgreSQLRAGRetriever,
+from backend.rag.retrieval.reranker_adapter import (
+    RerankerAdapter,
 )
+from backend.rag.retrieval.retriever import RAGRetriever
 
 
 # ==================================================
@@ -66,6 +86,39 @@ class FakeEmbedder:
             0.0,
             0.0,
         ])
+
+
+# ==================================================
+# Fake Reranker
+# ==================================================
+
+class FakeRerankItem:
+    """
+    模拟 backend.reranking.reranker.RerankResult 的字段契约。
+    """
+
+    def __init__(self, index, score):
+        self.index = index
+        self.score = score
+
+
+class PreservingReranker:
+    """
+    测试专用底层 Reranker：保持 Fusion 顺序。
+
+    真实 Cross Encoder Reranker 需要本地模型文件，
+    因此持久化 E2E 注入 Fake，只验证 Pipeline 编排
+    与 PostgreSQL storage 的接入。
+    """
+
+    def rerank(self, query, texts):
+        return [
+            FakeRerankItem(
+                index=index,
+                score=1.0 / (index + 1),
+            )
+            for index, text in enumerate(texts)
+        ]
 
 
 # ==================================================
@@ -179,12 +232,12 @@ def test_persistent_ingestion_to_retrieval(
     assert ingestion_result.chunk_count == 3
 
     # --------------------------------------------------
-    # 2. Build Persistent Retrieval Pipeline
+    # 2. Build Retrieval Pipeline
+    #
+    # 唯一的 Orchestrator 是 RAGRetriever：
+    # Dense 路径注入 PostgreSQL 实现，
+    # 语料文本与 Hydration 都走 Repository。
     # --------------------------------------------------
-
-    vector_search = PostgreSQLVectorSearch(
-        session_factory=session_factory,
-    )
 
     chunk_repository = ChunkRepository(
         session_factory=session_factory,
@@ -194,28 +247,47 @@ def test_persistent_ingestion_to_retrieval(
         session_factory=session_factory,
     )
 
-    hydrator = PostgreSQLHydrator(
-        chunk_repository=chunk_repository,
-        document_repository=document_repository,
-    )
-
-    retriever = PostgreSQLRAGRetriever(
+    retriever = RAGRetriever(
         embedder=embedder,
-        vector_search=vector_search,
-        hydrator=hydrator,
+        dense_retriever=PostgreSQLVectorSearch(
+            embedding_model=embedder.model_name,
+            session_factory=session_factory,
+        ),
+        bm25_retriever=BM25Retriever(),
+        fusion=RRFFusion(),
+        rerank_document_builder=RerankDocumentBuilder(),
+        reranker=RerankerAdapter(PreservingReranker()),
+        hydrator=RAGHydrator(
+            chunk_repository=chunk_repository,
+            document_repository=document_repository,
+        ),
     )
 
     # --------------------------------------------------
-    # 3. Persistent Retrieval
+    # 3. BM25 / Rerank 需要的语料文本同样来自 Repository
+    # --------------------------------------------------
+
+    chunk_store = {
+        chunk.chunk_id: chunk
+        for chunk in chunk_repository.get_by_ids([
+            "doc_1_chunk_0",
+            "doc_1_chunk_1",
+            "doc_1_chunk_2",
+        ])
+    }
+
+    # --------------------------------------------------
+    # 4. Retrieval
     # --------------------------------------------------
 
     results = retriever.retrieve(
         query="find AA",
+        chunk_store=chunk_store,
         top_k=2,
     )
 
     # --------------------------------------------------
-    # 4. Assert Ranking
+    # 5. Assert Ranking
     # --------------------------------------------------
 
     assert [
@@ -235,7 +307,7 @@ def test_persistent_ingestion_to_retrieval(
     ]
 
     # --------------------------------------------------
-    # 5. Assert Hydration
+    # 6. Assert Hydration
     # --------------------------------------------------
 
     assert all(
@@ -249,7 +321,7 @@ def test_persistent_ingestion_to_retrieval(
     )
 
     # --------------------------------------------------
-    # 6. Assert Ranking
+    # 7. Assert Ranking
     # --------------------------------------------------
 
     assert [

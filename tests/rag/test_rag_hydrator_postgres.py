@@ -14,8 +14,8 @@ from backend.rag.retrieval.repositories import (
     ChunkRepository,
     DocumentRepository,
 )
-from backend.rag.retrieval.postgres_hydrator import (
-    PostgreSQLHydrator,
+from backend.rag.retrieval.hydrator import (
+    RAGHydrator,
 )
 
 
@@ -118,7 +118,7 @@ def seed_data(factory):
 
 def build_hydrator(factory):
 
-    return PostgreSQLHydrator(
+    return RAGHydrator(
         chunk_repository=ChunkRepository(
             factory
         ),
@@ -286,7 +286,7 @@ def test_missing_document_raises(
 
     seed_data(session_factory)
 
-    hydrator = PostgreSQLHydrator(
+    hydrator = RAGHydrator(
         chunk_repository=ChunkRepository(
             session_factory
         ),

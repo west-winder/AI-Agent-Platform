@@ -11,19 +11,18 @@ def test_search_returns_top_k_results():
     ExactDenseSearch 应该只返回相关度最高的 Top-K。
     """
 
-    searcher = ExactDenseSearch()
+    searcher = ExactDenseSearch(
+        {
+            "chunk_1": np.array([1.0, 0.0]),
+            "chunk_2": np.array([0.0, 1.0]),
+            "chunk_3": np.array([0.8, 0.2]),
+        }
+    )
 
     query_vector = np.array([1.0, 0.0])
 
-    chunk_vectors = {
-        "chunk_1": np.array([1.0, 0.0]),
-        "chunk_2": np.array([0.0, 1.0]),
-        "chunk_3": np.array([0.8, 0.2]),
-    }
-
     results = searcher.search(
         query_vector=query_vector,
-        chunk_vectors=chunk_vectors,
         top_k=2,
     )
 
@@ -43,13 +42,12 @@ def test_search_empty_corpus_returns_empty_list():
     Empty Corpus 是合法业务状态，不是 Failure。
     """
 
-    searcher = ExactDenseSearch()
+    searcher = ExactDenseSearch({})
 
     query_vector = np.array([1.0, 0.0])
 
     results = searcher.search(
         query_vector=query_vector,
-        chunk_vectors={},
         top_k=5,
     )
 
@@ -61,19 +59,18 @@ def test_search_sorts_results_by_score_descending():
     DenseRetrieverResult 必须按照 dense_score 从高到低排列。
     """
 
-    searcher = ExactDenseSearch()
+    searcher = ExactDenseSearch(
+        {
+            "chunk_low": np.array([0.0, 1.0]),
+            "chunk_high": np.array([1.0, 0.0]),
+            "chunk_middle": np.array([0.8, 0.2]),
+        }
+    )
 
     query_vector = np.array([1.0, 0.0])
 
-    chunk_vectors = {
-        "chunk_low": np.array([0.0, 1.0]),
-        "chunk_high": np.array([1.0, 0.0]),
-        "chunk_middle": np.array([0.8, 0.2]),
-    }
-
     results = searcher.search(
         query_vector=query_vector,
-        chunk_vectors=chunk_vectors,
         top_k=3,
     )
 
@@ -100,22 +97,19 @@ def test_search_raises_when_vector_dimensions_do_not_match():
     不能静默跳过。
     """
 
-    searcher = ExactDenseSearch()
+    searcher = ExactDenseSearch(
+        {
+            "chunk_1": np.array([1.0, 0.0])
+        }
+    )
 
     query_vector = np.array(
         [1.0, 0.0, 0.0]
     )
 
-    chunk_vectors = {
-        "chunk_1": np.array(
-            [1.0, 0.0]
-        )
-    }
-
     with pytest.raises(ValueError):
         searcher.search(
             query_vector=query_vector,
-            chunk_vectors=chunk_vectors,
             top_k=1,
         )
 
@@ -128,21 +122,18 @@ def test_search_raises_when_vector_is_zero_vector():
     不是 similarity = 0。
     """
 
-    searcher = ExactDenseSearch()
+    searcher = ExactDenseSearch(
+        {
+            "chunk_1": np.array([0.0, 0.0])
+        }
+    )
 
     query_vector = np.array(
         [1.0, 0.0]
     )
 
-    chunk_vectors = {
-        "chunk_1": np.array(
-            [0.0, 0.0]
-        )
-    }
-
     with pytest.raises(ValueError):
         searcher.search(
             query_vector=query_vector,
-            chunk_vectors=chunk_vectors,
             top_k=1,
         )

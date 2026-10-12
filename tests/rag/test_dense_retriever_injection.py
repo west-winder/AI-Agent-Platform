@@ -1,13 +1,37 @@
+"""
+RAGRetriever 的 DenseRetriever 注入契约测试（确定性，不联网 / 不依赖数据库）。
+
+验证 RAGRetriever 只按 DenseRetriever Contract 调用 dense 路径：
+
+1. Query -> Embedder -> Query Vector
+2. Query Vector + top_k -> 注入的 DenseRetriever
+3. DenseRetrieverResult.dense_rank -> RetrievedCandidate.rank
+4. Empty Retrieval 合法
+5. Dense 失败必须在 Hydration 之前向上传播
+
+持久化形态（真实 PostgreSQLVectorSearch + RAGHydrator）见
+test_rag_retriever_postgres.py。
+"""
+
 import numpy as np
 import pytest
 
 from backend.rag.contracts import (
+    Chunk,
     DenseRetrieverResult,
     RagRetrievedChunk,
 )
-from backend.rag.retrieval.postgres_retriever import (
-    PostgreSQLRAGRetriever,
+from backend.rag.retrieval.bm25_retriever import (
+    BM25Retriever,
 )
+from backend.rag.retrieval.fusion import RRFFusion
+from backend.rag.retrieval.rerank_document_builder import (
+    RerankDocumentBuilder,
+)
+from backend.rag.retrieval.reranker_adapter import (
+    RerankerAdapter,
+)
+from backend.rag.retrieval.retriever import RAGRetriever
 
 
 # ==================================================
@@ -25,21 +49,24 @@ class FakeEmbedder:
         return np.array([1.0, 0.0, 0.0])
 
 
-class FakeVectorSearch:
+class FakeDenseRetriever:
+    """
+    DenseRetriever Contract 的 Fake 实现。
+
+    只暴露 Contract 要求的 search(query_vector, top_k)，
+    RAGRetriever 不应该知道它背后是 dict 还是 PostgreSQL。
+    """
 
     def __init__(self):
         self.received_query_vector = None
-        self.received_embedding_model = None
         self.received_top_k = None
 
     def search(
         self,
         query_vector,
-        embedding_model,
-        top_k,
+        top_k=5,
     ):
         self.received_query_vector = query_vector
-        self.received_embedding_model = embedding_model
         self.received_top_k = top_k
 
         return [
@@ -56,7 +83,35 @@ class FakeVectorSearch:
         ]
 
 
+class FakeRerankItem:
+    """
+    模拟 backend.reranking.reranker.RerankResult 的字段契约。
+    """
+
+    def __init__(self, index, score):
+        self.index = index
+        self.score = score
+
+
+class PreservingReranker:
+    """
+    保持 Fusion 顺序，避免测试关注真实 Rerank 模型。
+    """
+
+    def rerank(self, query, texts):
+        return [
+            FakeRerankItem(
+                index=index,
+                score=1.0 / (index + 1),
+            )
+            for index, text in enumerate(texts)
+        ]
+
+
 class FakeHydrator:
+    """
+    记录进入 Hydration 的候选，返回固定结果。
+    """
 
     def __init__(self):
         self.received_candidates = None
@@ -66,6 +121,9 @@ class FakeHydrator:
         candidates,
     ):
         self.received_candidates = candidates
+
+        if not candidates:
+            return []
 
         return [
             RagRetrievedChunk(
@@ -85,6 +143,36 @@ class FakeHydrator:
         ]
 
 
+CHUNK_STORE = {
+    "chunk_1": Chunk(
+        chunk_id="chunk_1",
+        document_id="doc_1",
+        content="Content 1",
+    ),
+    "chunk_2": Chunk(
+        chunk_id="chunk_2",
+        document_id="doc_1",
+        content="Content 2",
+    ),
+}
+
+
+def build_retriever(
+    embedder,
+    dense_retriever,
+    hydrator,
+) -> RAGRetriever:
+    return RAGRetriever(
+        embedder=embedder,
+        dense_retriever=dense_retriever,
+        bm25_retriever=BM25Retriever(),
+        fusion=RRFFusion(),
+        rerank_document_builder=RerankDocumentBuilder(),
+        reranker=RerankerAdapter(PreservingReranker()),
+        hydrator=hydrator,
+    )
+
+
 # ==================================================
 # Case 1：完整编排流程
 # ==================================================
@@ -92,37 +180,32 @@ class FakeHydrator:
 def test_retriever_orchestration():
 
     embedder = FakeEmbedder()
-    vector_search = FakeVectorSearch()
+    dense_retriever = FakeDenseRetriever()
     hydrator = FakeHydrator()
 
-    retriever = PostgreSQLRAGRetriever(
-        embedder=embedder,
-        vector_search=vector_search,
-        hydrator=hydrator,
+    retriever = build_retriever(
+        embedder,
+        dense_retriever,
+        hydrator,
     )
 
     results = retriever.retrieve(
         query="What is RAG?",
+        chunk_store=CHUNK_STORE,
         top_k=2,
     )
 
     # Query -> Embedder
     assert embedder.received_query == "What is RAG?"
 
-    # Query Vector -> Vector Search
+    # Query Vector -> DenseRetriever Contract
     np.testing.assert_allclose(
-        vector_search.received_query_vector,
+        dense_retriever.received_query_vector,
         [1.0, 0.0, 0.0],
     )
 
-    # Embedder identity -> Vector Search
-    assert (
-        vector_search.received_embedding_model
-        == "test-model"
-    )
-
     # top_k 正确传递
-    assert vector_search.received_top_k == 2
+    assert dense_retriever.received_top_k == 2
 
     # DenseRetrieverResult[] -> RetrievedCandidate[] -> Hydrator
     assert [
@@ -156,42 +239,29 @@ def test_retriever_orchestration():
 # Case 2：Empty Retrieval
 # ==================================================
 
-class EmptyVectorSearch:
+class EmptyDenseRetriever:
 
     def search(
         self,
         query_vector,
-        embedding_model,
-        top_k,
+        top_k=5,
     ):
-        return []
-
-
-class EmptyHydrator:
-
-    def __init__(self):
-        self.received_candidates = None
-
-    def hydrate(
-        self,
-        candidates,
-    ):
-        self.received_candidates = candidates
         return []
 
 
 def test_empty_retrieval():
 
-    hydrator = EmptyHydrator()
+    hydrator = FakeHydrator()
 
-    retriever = PostgreSQLRAGRetriever(
-        embedder=FakeEmbedder(),
-        vector_search=EmptyVectorSearch(),
-        hydrator=hydrator,
+    retriever = build_retriever(
+        FakeEmbedder(),
+        EmptyDenseRetriever(),
+        hydrator,
     )
 
     results = retriever.retrieve(
         query="nothing",
+        chunk_store={},
         top_k=5,
     )
 
@@ -200,19 +270,18 @@ def test_empty_retrieval():
 
 
 # ==================================================
-# Case 3：Search Failure 必须传播
+# Case 3：Dense Retrieval Failure 必须传播
 # ==================================================
 
-class FailingVectorSearch:
+class FailingDenseRetriever:
 
     def search(
         self,
         query_vector,
-        embedding_model,
-        top_k,
+        top_k=5,
     ):
         raise RuntimeError(
-            "simulated vector search failure"
+            "simulated dense retrieval failure"
         )
 
 
@@ -229,17 +298,18 @@ class ForbiddenHydrator:
 
 def test_search_failure_propagates():
 
-    retriever = PostgreSQLRAGRetriever(
-        embedder=FakeEmbedder(),
-        vector_search=FailingVectorSearch(),
-        hydrator=ForbiddenHydrator(),
+    retriever = build_retriever(
+        FakeEmbedder(),
+        FailingDenseRetriever(),
+        ForbiddenHydrator(),
     )
 
     with pytest.raises(
         RuntimeError,
-        match="simulated vector search failure",
+        match="simulated dense retrieval failure",
     ):
         retriever.retrieve(
             query="test",
+            chunk_store=CHUNK_STORE,
             top_k=5,
         )

@@ -7,7 +7,6 @@ from backend.rag.ingestion.chunker import chunk_document
 from backend.rag.retrieval.bm25_retriever import BM25Retriever
 from backend.rag.retrieval.exact_search import ExactDenseSearch
 from backend.rag.retrieval.fusion import RRFFusion
-from backend.rag.retrieval.hydrator import RAGHydrator
 from backend.rag.retrieval.rerank_document_builder import (
     RerankDocumentBuilder,
 )
@@ -15,6 +14,8 @@ from backend.rag.retrieval.reranker_adapter import (
     RerankerAdapter,
 )
 from backend.rag.retrieval.retriever import RAGRetriever
+
+from inmemory_repositories import build_inmemory_hydrator
 
 
 class FakeRAGEmbedder:
@@ -81,22 +82,35 @@ class PreservingReranker:
         ]
 
 
-def build_pipeline():
-    embedder = FakeRAGEmbedder()
+def build_pipeline(
+    embedder,
+    chunk_vectors,
+    chunk_store,
+    document_store,
+):
+    """
+    Dense 路径注入 DenseRetriever Contract 的内存实现，
+    Hydrator 只依赖 Repository Contract。
+    """
 
     retriever = RAGRetriever(
         embedder=embedder,
-        exact_search=ExactDenseSearch(),
+        dense_retriever=ExactDenseSearch(
+            chunk_vectors
+        ),
         bm25_retriever=BM25Retriever(),
         fusion=RRFFusion(),
         rerank_document_builder=RerankDocumentBuilder(),
         reranker=RerankerAdapter(PreservingReranker()),
-        hydrator=RAGHydrator(),
+        hydrator=build_inmemory_hydrator(
+            chunk_store,
+            document_store,
+        ),
     )
 
     assembler = ContextAssembler()
 
-    return embedder, retriever, assembler
+    return retriever, assembler
 
 
 def build_document() -> Document:
@@ -132,9 +146,7 @@ def test_rag_integration_happy_path():
         chunk_size=5,
     )
 
-    embedder, retriever, assembler = (
-        build_pipeline()
-    )
+    embedder = FakeRAGEmbedder()
 
     chunk_vectors = build_chunk_vectors(
         chunks=chunks,
@@ -150,11 +162,16 @@ def test_rag_integration_happy_path():
         document.document_id: document
     }
 
+    retriever, assembler = build_pipeline(
+        embedder,
+        chunk_vectors,
+        chunk_store,
+        document_store,
+    )
+
     retrieved_chunks = retriever.retrieve(
         query="find BBBBB",
-        chunk_vectors=chunk_vectors,
         chunk_store=chunk_store,
-        document_store=document_store,
         top_k=1,
     )
 
@@ -212,9 +229,7 @@ def test_rag_integration_empty_path():
         chunk_size=5,
     )
 
-    embedder, retriever, assembler = (
-        build_pipeline()
-    )
+    embedder = FakeRAGEmbedder()
 
     chunk_vectors = build_chunk_vectors(
         chunks=chunks,
@@ -227,11 +242,16 @@ def test_rag_integration_empty_path():
         document.document_id: document
     }
 
+    retriever, assembler = build_pipeline(
+        embedder,
+        chunk_vectors,
+        chunk_store,
+        document_store,
+    )
+
     retrieved_chunks = retriever.retrieve(
         query="empty query",
-        chunk_vectors=chunk_vectors,
         chunk_store=chunk_store,
-        document_store=document_store,
         top_k=5,
     )
 
@@ -251,7 +271,7 @@ def test_rag_integration_preserves_ranking():
     """
     Retrieval Ranking 必须穿过：
 
-    Exact Search
+    DenseRetriever
         ↓
     Hydration
         ↓
@@ -270,9 +290,7 @@ def test_rag_integration_preserves_ranking():
         chunk_size=5,
     )
 
-    embedder, retriever, assembler = (
-        build_pipeline()
-    )
+    embedder = FakeRAGEmbedder()
 
     chunk_vectors = build_chunk_vectors(
         chunks=chunks,
@@ -288,11 +306,16 @@ def test_rag_integration_preserves_ranking():
         document.document_id: document
     }
 
+    retriever, assembler = build_pipeline(
+        embedder,
+        chunk_vectors,
+        chunk_store,
+        document_store,
+    )
+
     retrieved_chunks = retriever.retrieve(
         query="ranking query",
-        chunk_vectors=chunk_vectors,
         chunk_store=chunk_store,
-        document_store=document_store,
         top_k=2,
     )
 

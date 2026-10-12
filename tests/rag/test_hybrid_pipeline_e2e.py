@@ -8,7 +8,6 @@ from backend.rag.contracts import (
 from backend.rag.retrieval.bm25_retriever import BM25Retriever
 from backend.rag.retrieval.exact_search import ExactDenseSearch
 from backend.rag.retrieval.fusion import RRFFusion
-from backend.rag.retrieval.hydrator import RAGHydrator
 from backend.rag.retrieval.rerank_document_builder import (
     RerankDocumentBuilder,
 )
@@ -16,6 +15,8 @@ from backend.rag.retrieval.reranker_adapter import (
     RerankerAdapter,
 )
 from backend.rag.retrieval.retriever import RAGRetriever
+
+from inmemory_repositories import build_inmemory_hydrator
 
 
 # ==================================================
@@ -116,17 +117,24 @@ RERANK_SCORES = {
 }
 
 
-def build_retriever() -> RAGRetriever:
+def build_retriever(
+    chunk_vectors=CHUNK_VECTORS,
+) -> RAGRetriever:
     return RAGRetriever(
         embedder=FakeEmbedder(),
-        exact_search=ExactDenseSearch(),
+        dense_retriever=ExactDenseSearch(
+            chunk_vectors
+        ),
         bm25_retriever=BM25Retriever(),
         fusion=RRFFusion(),
         rerank_document_builder=RerankDocumentBuilder(),
         reranker=RerankerAdapter(
             ContentScoringReranker(RERANK_SCORES)
         ),
-        hydrator=RAGHydrator(),
+        hydrator=build_inmemory_hydrator(
+            CHUNK_STORE,
+            DOCUMENT_STORE,
+        ),
     )
 
 
@@ -153,9 +161,7 @@ def test_bm25_only_recall_survives_until_hydration():
 
     results = build_retriever().retrieve(
         query="unique_keyword_xyz",
-        chunk_vectors=CHUNK_VECTORS,
         chunk_store=CHUNK_STORE,
-        document_store=DOCUMENT_STORE,
         top_k=3,
     )
 
@@ -203,9 +209,7 @@ def test_top_k_truncates_after_reranking():
 
     results = build_retriever().retrieve(
         query="unique_keyword_xyz",
-        chunk_vectors=CHUNK_VECTORS,
         chunk_store=CHUNK_STORE,
-        document_store=DOCUMENT_STORE,
         top_k=1,
     )
 
@@ -218,11 +222,16 @@ def test_top_k_truncates_after_reranking():
 
 
 def test_empty_corpus_returns_empty_list():
-    results = build_retriever().retrieve(
+    """
+    Empty Corpus 需要 Dense 语料与 Sparse 语料同时为空：
+    Dense 语料在构造时绑定，Sparse 语料在 retrieve 时传入。
+    """
+
+    results = build_retriever(
+        chunk_vectors={}
+    ).retrieve(
         query="unique_keyword_xyz",
-        chunk_vectors={},
         chunk_store={},
-        document_store={},
         top_k=5,
     )
 

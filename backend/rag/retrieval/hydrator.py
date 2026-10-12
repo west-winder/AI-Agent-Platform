@@ -1,9 +1,18 @@
+from typing import TYPE_CHECKING
+
 from backend.rag.contracts import (
-    Chunk,
-    Document,
     RagRetrievedChunk,
     RetrievedCandidate,
 )
+
+# Hydrator 只依赖 Repository Contract：
+# 这里仅做静态类型引用，运行时不 import repositories，
+# 因此 Hydrator 不会传递性依赖 SQLAlchemy / Session / ORM。
+if TYPE_CHECKING:
+    from backend.rag.retrieval.repositories import (
+        ChunkRepository,
+        DocumentRepository,
+    )
 
 
 class RAGHydrator:
@@ -16,34 +25,47 @@ class RAGHydrator:
 
     RetrievedCandidate[]
         ↓
-    根据 chunk_id 查找 Chunk
+    ChunkRepository 批量查询 Chunk
         ↓
-    根据 Chunk.document_id 查找 Document
+    DocumentRepository 批量查询 Document
         ↓
-    组合成 RagRetrievedChunk[]
+    一致性检查
         ↓
-    返回给 RAGRetriever
+    按 RetrievedCandidate 顺序恢复 Ranking
+        ↓
+    RagRetrievedChunk[]
 
-    本组件不负责：
+    它只依赖 Repository Contract：
+
+    生产注入 PostgreSQL Repository，
+    测试注入 InMemory Repository。
+
+    本组件不感知：
+    - PostgreSQL
+    - dict
+    - SQLAlchemy
+    - 任何 storage implementation
+
+    也不负责：
 
     1. Query Embedding
     2. Retrieval（Dense / Sparse）
     3. Ranking（不重排、不算分）
     4. Context Assembly
     5. LLM Generation
-
-    它只做一件事：
-
-    按输入顺序把 chunk_id 恢复成完整的 RagRetrievedChunk，
-    并把上游 Retrieval / Ranking 阶段给出的业务排名
-    原样带入 retrieval_rank。
     """
+
+    def __init__(
+        self,
+        chunk_repository: "ChunkRepository",
+        document_repository: "DocumentRepository",
+    ):
+        self._chunk_repository = chunk_repository
+        self._document_repository = document_repository
 
     def hydrate(
         self,
         candidates: list[RetrievedCandidate],
-        chunk_store: dict[str, Chunk],
-        document_store: dict[str, Document],
     ) -> list[RagRetrievedChunk]:
         """
         按输入顺序，把 RetrievedCandidate 恢复成完整 RagRetrievedChunk。
@@ -53,80 +75,122 @@ class RAGHydrator:
                 Retrieval / Ranking 阶段给出的候选，
                 已携带 1-based 业务排名。
 
-            chunk_store:
-                chunk_id -> Chunk
-
-            document_store:
-                document_id -> Document
-
         返回：
             与 candidates 顺序一致的 RagRetrievedChunk 列表。
             本方法不重排、不算分、不改变顺序。
         """
 
-        # --------------------------------------------------
+        # ==========================================
         # 1. Empty Retrieval 是合法状态
-        # --------------------------------------------------
+        # ==========================================
 
         if not candidates:
             return []
 
-        # --------------------------------------------------
-        # 2. 按 RetrievedCandidate 顺序逐个 Hydration
-        # --------------------------------------------------
+        # ==========================================
+        # 2. 提取 RetrievedCandidate 中的 chunk_id
+        # ==========================================
+
+        chunk_ids = [
+            candidate.chunk_id
+            for candidate in candidates
+        ]
+
+        # ==========================================
+        # 3. Batch Query：Chunk
+        # ==========================================
+
+        chunks = self._chunk_repository.get_by_ids(
+            chunk_ids
+        )
+
+        chunk_by_id = {
+            chunk.chunk_id: chunk
+            for chunk in chunks
+        }
+
+        # ==========================================
+        # 4. Chunk 一致性检查
+        # ==========================================
+
+        missing_chunk_ids = [
+            chunk_id
+            for chunk_id in chunk_ids
+            if chunk_id not in chunk_by_id
+        ]
+
+        if missing_chunk_ids:
+            raise KeyError(
+                "Hydration failed: "
+                "RetrievedCandidate references missing chunks: "
+                f"{missing_chunk_ids}"
+            )
+
+        # ==========================================
+        # 5. 提取 document_id
+        # ==========================================
+
+        document_ids = list(
+            dict.fromkeys(
+                chunk_by_id[chunk_id].document_id
+                for chunk_id in chunk_ids
+            )
+        )
+
+        # ==========================================
+        # 6. Batch Query：Document
+        # ==========================================
+
+        documents = self._document_repository.get_by_ids(
+            document_ids
+        )
+
+        document_by_id = {
+            document.document_id: document
+            for document in documents
+        }
+
+        # ==========================================
+        # 7. Document 一致性检查
+        # ==========================================
+
+        missing_document_ids = [
+            document_id
+            for document_id in document_ids
+            if document_id not in document_by_id
+        ]
+
+        if missing_document_ids:
+            raise KeyError(
+                "Hydration failed: "
+                "chunks reference missing documents: "
+                f"{missing_document_ids}"
+            )
+
+        # ==========================================
+        # 8. Order Preservation + Hydration
+        # ==========================================
 
         retrieved_chunks: list[RagRetrievedChunk] = []
 
         for candidate in candidates:
 
-            # ----------------------------------------------
-            # 2.1 RetrievedCandidate -> Chunk
-            # ----------------------------------------------
-
-            chunk = chunk_store.get(
+            chunk = chunk_by_id[
                 candidate.chunk_id
-            )
+            ]
 
-            if chunk is None:
-                raise KeyError(
-                    "Hydration failed: "
-                    f"chunk '{candidate.chunk_id}' "
-                    "does not exist in chunk_store"
-                )
-
-            # ----------------------------------------------
-            # 2.2 Chunk -> Document
-            # ----------------------------------------------
-
-            document = document_store.get(
+            document = document_by_id[
                 chunk.document_id
-            )
-
-            if document is None:
-                raise KeyError(
-                    "Hydration failed: "
-                    f"document '{chunk.document_id}' "
-                    "does not exist in document_store"
-                )
-
-            # ----------------------------------------------
-            # 2.3 组合完整 RagRetrievedChunk
-            # ----------------------------------------------
-
-            retrieved_chunk = RagRetrievedChunk(
-                chunk_id=chunk.chunk_id,
-                document_id=chunk.document_id,
-                content=chunk.content,
-                source=document.file_name,
-                retrieval_rank=candidate.rank,
-            )
+            ]
 
             retrieved_chunks.append(
-                retrieved_chunk
+                RagRetrievedChunk(
+                    chunk_id=chunk.chunk_id,
+                    document_id=chunk.document_id,
+                    content=chunk.content,
+                    source=document.file_name,
+                    retrieval_rank=candidate.rank,
+                )
             )
-
-        # --------------------------------------------------
-        # 3. 返回完整 Retrieval Result
-        # --------------------------------------------------
 
         return retrieved_chunks

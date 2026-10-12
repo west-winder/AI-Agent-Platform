@@ -6,7 +6,8 @@ from backend.rag.contracts import (
     RagRetrievedChunk,
     RetrievedCandidate,
 )
-from backend.rag.retrieval.hydrator import RAGHydrator
+
+from inmemory_repositories import build_inmemory_hydrator
 
 
 def test_hydrate_returns_complete_retrieved_chunks_in_order():
@@ -15,16 +16,14 @@ def test_hydrate_returns_complete_retrieved_chunks_in_order():
 
     RetrievedCandidate
         ↓
-    Chunk
+    ChunkRepository
         ↓
-    Document
+    DocumentRepository
         ↓
     RagRetrievedChunk
 
     同时必须保持 RetrievedCandidate 原有 Ranking 顺序。
     """
-
-    hydrator = RAGHydrator()
 
     candidates = [
         RetrievedCandidate(
@@ -63,10 +62,13 @@ def test_hydrate_returns_complete_retrieved_chunks_in_order():
         ),
     }
 
+    hydrator = build_inmemory_hydrator(
+        chunk_store,
+        document_store,
+    )
+
     results = hydrator.hydrate(
         candidates=candidates,
-        chunk_store=chunk_store,
-        document_store=document_store,
     )
 
     assert len(results) == 2
@@ -95,12 +97,10 @@ def test_hydrate_empty_results_returns_empty_list():
     Empty Retrieval 是合法业务状态。
     """
 
-    hydrator = RAGHydrator()
+    hydrator = build_inmemory_hydrator({}, {})
 
     results = hydrator.hydrate(
         candidates=[],
-        chunk_store={},
-        document_store={},
     )
 
     assert results == []
@@ -114,7 +114,7 @@ def test_hydrate_raises_when_chunk_is_missing():
     不能静默 skip。
     """
 
-    hydrator = RAGHydrator()
+    hydrator = build_inmemory_hydrator({}, {})
 
     candidates = [
         RetrievedCandidate(
@@ -126,8 +126,6 @@ def test_hydrate_raises_when_chunk_is_missing():
     with pytest.raises(KeyError):
         hydrator.hydrate(
             candidates=candidates,
-            chunk_store={},
-            document_store={},
         )
 
 
@@ -139,15 +137,6 @@ def test_hydrate_raises_when_document_is_missing():
     不能生成不完整 RagRetrievedChunk。
     """
 
-    hydrator = RAGHydrator()
-
-    candidates = [
-        RetrievedCandidate(
-            chunk_id="chunk_1",
-            rank=1,
-        )
-    ]
-
     chunk_store = {
         "chunk_1": Chunk(
             chunk_id="chunk_1",
@@ -156,9 +145,19 @@ def test_hydrate_raises_when_document_is_missing():
         )
     }
 
+    hydrator = build_inmemory_hydrator(
+        chunk_store,
+        {},
+    )
+
+    candidates = [
+        RetrievedCandidate(
+            chunk_id="chunk_1",
+            rank=1,
+        )
+    ]
+
     with pytest.raises(KeyError):
         hydrator.hydrate(
             candidates=candidates,
-            chunk_store=chunk_store,
-            document_store={},
         )

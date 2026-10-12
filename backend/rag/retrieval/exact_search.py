@@ -7,6 +7,8 @@ class ExactDenseSearch:
     """
     RAG 的 In-Memory Exact Dense Search。
 
+    DenseRetriever Contract 的内存实现。
+
     职责：
 
     Query Vector
@@ -16,6 +18,9 @@ class ExactDenseSearch:
     按相似度排序
         ↓
     返回 Top-K DenseRetrieverResult
+
+    语料在构造时绑定，
+    因此 search() 只接收 Query Vector 与 top_k。
 
     本组件不负责：
 
@@ -27,10 +32,27 @@ class ExactDenseSearch:
     6. LLM Generation
     """
 
+    def __init__(
+        self,
+        chunk_vectors: dict[str, np.ndarray],
+    ):
+        """
+        参数：
+            chunk_vectors:
+                chunk_id -> embedding vector 的显式映射，
+                即本 Dense Retriever 检索的语料。
+        """
+
+        if not isinstance(chunk_vectors, dict):
+            raise TypeError(
+                "chunk_vectors must be dict[str, np.ndarray]"
+            )
+
+        self._chunk_vectors = chunk_vectors
+
     def search(
         self,
         query_vector: np.ndarray,
-        chunk_vectors: dict[str, np.ndarray],
         top_k: int = 5,
     ) -> list[DenseRetrieverResult]:
         """
@@ -39,9 +61,6 @@ class ExactDenseSearch:
         参数：
             query_vector:
                 Query 的 Embedding Vector。
-
-            chunk_vectors:
-                chunk_id -> embedding vector 的显式映射。
 
             top_k:
                 最多返回多少个 DenseRetrieverResult。
@@ -61,16 +80,11 @@ class ExactDenseSearch:
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
 
-        if not isinstance(chunk_vectors, dict):
-            raise TypeError(
-                "chunk_vectors must be dict[str, np.ndarray]"
-            )
-
         # --------------------------------------------------
         # 2. Empty Corpus 是合法状态
         # --------------------------------------------------
 
-        if not chunk_vectors:
+        if not self._chunk_vectors:
             return []
 
         # --------------------------------------------------
@@ -88,7 +102,7 @@ class ExactDenseSearch:
 
         scored: list[tuple[str, float]] = []
 
-        for chunk_id, chunk_vector in chunk_vectors.items():
+        for chunk_id, chunk_vector in self._chunk_vectors.items():
 
             if not isinstance(chunk_id, str):
                 raise TypeError("chunk_id must be str")

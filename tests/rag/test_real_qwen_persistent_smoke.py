@@ -15,19 +15,27 @@ from backend.rag.contracts import Document
 from backend.rag.ingestion.rag_ingestion import (
     RAGIngestionService,
 )
-from backend.rag.retrieval.dense_retriever import (
+from backend.rag.retrieval.bm25_retriever import (
+    BM25Retriever,
+)
+from backend.rag.retrieval.fusion import RRFFusion
+from backend.rag.retrieval.hydrator import (
+    RAGHydrator,
+)
+from backend.rag.retrieval.postgres_vector_search import (
     PostgreSQLVectorSearch,
 )
 from backend.rag.retrieval.repositories import (
     ChunkRepository,
     DocumentRepository,
 )
-from backend.rag.retrieval.postgres_hydrator import (
-    PostgreSQLHydrator,
+from backend.rag.retrieval.rerank_document_builder import (
+    RerankDocumentBuilder,
 )
-from backend.rag.retrieval.postgres_retriever import (
-    PostgreSQLRAGRetriever,
+from backend.rag.retrieval.reranker_adapter import (
+    RerankerAdapter,
 )
+from backend.rag.retrieval.retriever import RAGRetriever
 
 
 # ==================================================
@@ -41,6 +49,38 @@ from backend.rag.retrieval.postgres_retriever import (
 #
 # 默认不进入普通 regression
 # ==================================================
+
+
+# ==================================================
+# Fake Reranker
+# ==================================================
+
+class FakeRerankItem:
+    """
+    模拟 backend.reranking.reranker.RerankResult 的字段契约。
+    """
+
+    def __init__(self, index, score):
+        self.index = index
+        self.score = score
+
+
+class PreservingReranker:
+    """
+    测试专用底层 Reranker：保持 Fusion 顺序。
+
+    本 smoke test 关注真实 Embedding + 真实 pgvector
+    的召回质量，因此不叠加真实 Cross Encoder Reranker。
+    """
+
+    def rerank(self, query, texts):
+        return [
+            FakeRerankItem(
+                index=index,
+                score=1.0 / (index + 1),
+            )
+            for index, text in enumerate(texts)
+        ]
 
 
 @pytest.fixture(scope="module")
@@ -181,39 +221,61 @@ def test_real_qwen_persistent_rag_smoke(
         assert result.chunk_count == 1
 
     # ==================================================
-    # 2. Build Persistent Retrieval Pipeline
+    # 2. Build Retrieval Pipeline
+    #
+    # 唯一 Orchestrator 是 RAGRetriever：
+    # Dense 路径注入 PostgreSQL 实现。
     # ==================================================
 
-    vector_search = PostgreSQLVectorSearch(
+    chunk_repository = ChunkRepository(
         session_factory=session_factory,
     )
 
-    hydrator = PostgreSQLHydrator(
-        chunk_repository=ChunkRepository(
-            session_factory=session_factory,
-        ),
-        document_repository=DocumentRepository(
-            session_factory=session_factory,
-        ),
+    document_repository = DocumentRepository(
+        session_factory=session_factory,
     )
 
-    retriever = PostgreSQLRAGRetriever(
+    retriever = RAGRetriever(
         embedder=embedder,
-        vector_search=vector_search,
-        hydrator=hydrator,
+        dense_retriever=PostgreSQLVectorSearch(
+            embedding_model=embedder.model_name,
+            session_factory=session_factory,
+        ),
+        bm25_retriever=BM25Retriever(),
+        fusion=RRFFusion(),
+        rerank_document_builder=RerankDocumentBuilder(),
+        reranker=RerankerAdapter(PreservingReranker()),
+        hydrator=RAGHydrator(
+            chunk_repository=chunk_repository,
+            document_repository=document_repository,
+        ),
     )
 
     # ==================================================
-    # 3. Real Query Embedding + pgvector Search
+    # 3. BM25 / Rerank 需要的语料文本同样来自 Repository
+    # ==================================================
+
+    chunk_store = {
+        chunk.chunk_id: chunk
+        for chunk in chunk_repository.get_by_ids([
+            "doc_vector_chunk_0",
+            "doc_fastapi_chunk_0",
+            "doc_cat_chunk_0",
+        ])
+    }
+
+    # ==================================================
+    # 4. Real Query Embedding + pgvector Search
     # ==================================================
 
     results = retriever.retrieve(
         query="PostgreSQL 怎么进行向量检索？",
+        chunk_store=chunk_store,
         top_k=3,
     )
 
     # ==================================================
-    # 4. Structural Assertions
+    # 5. Structural Assertions
     # ==================================================
 
     assert len(results) == 3
@@ -228,7 +290,7 @@ def test_real_qwen_persistent_rag_smoke(
     }
 
     # ==================================================
-    # 5. Semantic Smoke Assertion
+    # 6. Semantic Smoke Assertion
     # ==================================================
 
     # 这不是 Retrieval Evaluation，
@@ -239,7 +301,7 @@ def test_real_qwen_persistent_rag_smoke(
     )
 
     # ==================================================
-    # 6. Manual Inspection
+    # 7. Manual Inspection
     # ==================================================
 
     print("\n")
