@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from backend.rag.contracts import SearchResult
+from backend.rag.contracts import DenseRetrieverResult
 from backend.rag.retrieval.exact_search import ExactDenseSearch
 
 
@@ -30,7 +30,7 @@ def test_search_returns_top_k_results():
     assert len(results) == 2
 
     assert all(
-        isinstance(result, SearchResult)
+        isinstance(result, DenseRetrieverResult)
         for result in results
     )
 
@@ -58,7 +58,7 @@ def test_search_empty_corpus_returns_empty_list():
 
 def test_search_sorts_results_by_score_descending():
     """
-    SearchResult 必须按照 score 从高到低排列。
+    DenseRetrieverResult 必须按照 dense_score 从高到低排列。
     """
 
     searcher = ExactDenseSearch()
@@ -87,9 +87,9 @@ def test_search_sorts_results_by_score_descending():
     ]
 
     assert (
-        results[0].score
-        >= results[1].score
-        >= results[2].score
+        results[0].dense_score
+        >= results[1].dense_score
+        >= results[2].dense_score
     )
 
 

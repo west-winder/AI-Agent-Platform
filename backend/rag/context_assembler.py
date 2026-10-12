@@ -1,16 +1,16 @@
 from backend.rag.contracts import (
     AssembledContext,
-    RetrievedChunk,
+    RagRetrievedChunk,
 )
 
 
 class ContextAssembler:
     """
-    将 RetrievedChunk[] 组装成 LLM 可消费的 Document Context。
+    将 RagRetrievedChunk[] 组装成 LLM 可消费的 Document Context。
 
     职责：
 
-    RetrievedChunk[]
+    RagRetrievedChunk[]
         ↓
     保持原有 Retrieval 顺序
         ↓
@@ -31,10 +31,10 @@ class ContextAssembler:
 
     def assemble(
         self,
-        chunks: list[RetrievedChunk],
+        chunks: list[RagRetrievedChunk],
     ) -> AssembledContext:
         """
-        将 RetrievedChunk 列表组装为结构化 Context。
+        将 RagRetrievedChunk 列表组装为结构化 Context。
 
         Empty Input 是合法状态：
             []
@@ -56,7 +56,7 @@ class ContextAssembler:
             )
 
         # --------------------------------------------------
-        # 2. 每个 RetrievedChunk 转换成一个 Context Block
+        # 2. 每个 RagRetrievedChunk 转换成一个 Context Block
         # --------------------------------------------------
 
         context_blocks: list[str] = []

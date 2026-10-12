@@ -3,7 +3,7 @@ import numpy as np
 from backend.rag.contracts import (
     Chunk,
     Document,
-    RetrievedChunk,
+    RagRetrievedChunk,
 )
 from backend.rag.retrieval.exact_search import ExactDenseSearch
 from backend.rag.retrieval.hydrator import RAGHydrator
@@ -23,11 +23,11 @@ class RAGRetriever:
         ↓
     ExactDenseSearch
         ↓
-    SearchResult[]
+    DenseRetrieverResult[]
         ↓
     RAGHydrator
         ↓
-    RetrievedChunk[]
+    RagRetrievedChunk[]
 
     本组件只负责编排 Retrieval Pipeline。
 
@@ -62,12 +62,12 @@ class RAGRetriever:
         chunk_store: dict[str, Chunk],
         document_store: dict[str, Document],
         top_k: int = 5,
-    ) -> list[RetrievedChunk]:
+    ) -> list[RagRetrievedChunk]:
         """
         执行一次完整的 RAG Retrieval。
 
         返回：
-            按 Retrieval Ranking 排序的 RetrievedChunk[]。
+            按 Retrieval Ranking 排序的 RagRetrievedChunk[]。
         """
 
         # --------------------------------------------------

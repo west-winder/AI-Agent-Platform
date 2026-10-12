@@ -13,7 +13,7 @@ class ChunkRepository:
     - 根据 chunk_id 批量查询 Chunk
 
     不负责：
-    - SearchResult 一致性检查
+    - DenseRetrieverResult 一致性检查
     - Ranking / Order Preservation
     - Hydration
     """

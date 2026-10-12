@@ -9,7 +9,7 @@ from backend.models.rag_document import DocumentORM
 from backend.models.rag_chunk import ChunkORM
 from backend.models.rag_chunk_embedding import ChunkEmbeddingORM
 
-from backend.rag.contracts import SearchResult
+from backend.rag.contracts import DenseRetrieverResult
 from backend.rag.retrieval.repositories import (
     ChunkRepository,
     DocumentRepository,
@@ -169,17 +169,20 @@ def test_hydration_preserves_search_order(
     )
 
     search_results = [
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_3",
-            score=0.95,
+            dense_score=0.95,
+            dense_rank=1,
         ),
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_1",
-            score=0.90,
+            dense_score=0.90,
+            dense_rank=2,
         ),
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_2",
-            score=0.80,
+            dense_score=0.80,
+            dense_rank=3,
         ),
     ]
 
@@ -197,13 +200,13 @@ def test_hydration_preserves_search_order(
     ]
 
     assert [
-        item.score
+        item.retrieval_rank
         for item in results
-    ] == pytest.approx([
-        0.95,
-        0.90,
-        0.80,
-    ])
+    ] == [
+        1,
+        2,
+        3,
+    ]
 
     assert all(
         item.source == "knowledge.txt"
@@ -241,13 +244,15 @@ def test_missing_chunk_raises(
     )
 
     search_results = [
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_1",
-            score=0.9,
+            dense_score=0.9,
+            dense_rank=1,
         ),
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="missing_chunk",
-            score=0.8,
+            dense_score=0.8,
+            dense_rank=2,
         ),
     ]
 
@@ -296,9 +301,10 @@ def test_missing_document_raises(
     )
 
     search_results = [
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_1",
-            score=0.9,
+            dense_score=0.9,
+            dense_rank=1,
         ),
     ]
 

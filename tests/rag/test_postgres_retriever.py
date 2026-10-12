@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from backend.rag.contracts import (
-    SearchResult,
-    RetrievedChunk,
+    DenseRetrieverResult,
+    RagRetrievedChunk,
 )
 from backend.rag.retrieval.postgres_retriever import (
     PostgreSQLRAGRetriever,
@@ -43,13 +43,15 @@ class FakeVectorSearch:
         self.received_top_k = top_k
 
         return [
-            SearchResult(
+            DenseRetrieverResult(
                 chunk_id="chunk_2",
-                score=0.9,
+                dense_score=0.9,
+                dense_rank=1,
             ),
-            SearchResult(
+            DenseRetrieverResult(
                 chunk_id="chunk_1",
-                score=0.8,
+                dense_score=0.8,
+                dense_rank=2,
             ),
         ]
 
@@ -66,19 +68,19 @@ class FakeHydrator:
         self.received_search_results = search_results
 
         return [
-            RetrievedChunk(
+            RagRetrievedChunk(
                 chunk_id="chunk_2",
                 document_id="doc_1",
                 content="Content 2",
                 source="knowledge.txt",
-                score=0.9,
+                retrieval_rank=1,
             ),
-            RetrievedChunk(
+            RagRetrievedChunk(
                 chunk_id="chunk_1",
                 document_id="doc_1",
                 content="Content 1",
                 source="knowledge.txt",
-                score=0.8,
+                retrieval_rank=2,
             ),
         ]
 
@@ -122,7 +124,7 @@ def test_retriever_orchestration():
     # top_k 正确传递
     assert vector_search.received_top_k == 2
 
-    # SearchResult[] -> Hydrator
+    # DenseRetrieverResult[] -> Hydrator
     assert [
         item.chunk_id
         for item in hydrator.received_search_results
@@ -131,7 +133,7 @@ def test_retriever_orchestration():
         "chunk_1",
     ]
 
-    # 最终 RetrievedChunk[]
+    # 最终 RagRetrievedChunk[]
     assert [
         item.chunk_id
         for item in results

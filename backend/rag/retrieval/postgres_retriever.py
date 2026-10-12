@@ -1,5 +1,5 @@
-from backend.rag.contracts import RetrievedChunk
-from backend.rag.retrieval.postgres_vector_search import (
+from backend.rag.contracts import RagRetrievedChunk
+from backend.rag.retrieval.dense_retriever import (
     PostgreSQLVectorSearch,
 )
 from backend.rag.retrieval.postgres_hydrator import (
@@ -21,11 +21,11 @@ class PostgreSQLRAGRetriever:
         ↓
     PostgreSQLVectorSearch
         ↓
-    SearchResult[]
+    DenseRetrieverResult[]
         ↓
     PostgreSQLHydrator
         ↓
-    RetrievedChunk[]
+    RagRetrievedChunk[]
 
     本组件只负责编排，不实现：
     - Embedding 算法
@@ -48,7 +48,7 @@ class PostgreSQLRAGRetriever:
         self,
         query: str,
         top_k: int = 5,
-    ) -> list[RetrievedChunk]:
+    ) -> list[RagRetrievedChunk]:
 
         # ==========================================
         # 1. Query -> Embedding

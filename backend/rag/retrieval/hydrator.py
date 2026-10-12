@@ -1,8 +1,8 @@
 from backend.rag.contracts import (
     Chunk,
+    DenseRetrieverResult,
     Document,
-    RetrievedChunk,
-    SearchResult,
+    RagRetrievedChunk,
 )
 
 
@@ -12,13 +12,13 @@ class RAGHydrator:
 
     职责：
 
-    SearchResult[]
+    DenseRetrieverResult[]
         ↓
     根据 chunk_id 查找 Chunk
         ↓
     根据 Chunk.document_id 查找 Document
         ↓
-    组合成 RetrievedChunk[]
+    组合成 RagRetrievedChunk[]
         ↓
     返回给 RAGRetriever
 
@@ -33,16 +33,16 @@ class RAGHydrator:
 
     def hydrate(
         self,
-        search_results: list[SearchResult],
+        search_results: list[DenseRetrieverResult],
         chunk_store: dict[str, Chunk],
         document_store: dict[str, Document],
-    ) -> list[RetrievedChunk]:
+    ) -> list[RagRetrievedChunk]:
         """
-        将轻量 SearchResult 恢复成完整 RetrievedChunk。
+        将轻量 DenseRetrieverResult 恢复成完整 RagRetrievedChunk。
 
         参数：
             search_results:
-                Exact Search 返回的检索结果。
+                Dense Retriever 返回的检索结果。
 
             chunk_store:
                 chunk_id -> Chunk
@@ -51,7 +51,7 @@ class RAGHydrator:
                 document_id -> Document
 
         返回：
-            与 search_results 顺序一致的 RetrievedChunk 列表。
+            与 search_results 顺序一致的 RagRetrievedChunk 列表。
         """
 
         # --------------------------------------------------
@@ -62,15 +62,15 @@ class RAGHydrator:
             return []
 
         # --------------------------------------------------
-        # 2. 按 SearchResult 顺序逐个 Hydration
+        # 2. 按 DenseRetrieverResult 顺序逐个 Hydration
         # --------------------------------------------------
 
-        retrieved_chunks: list[RetrievedChunk] = []
+        retrieved_chunks: list[RagRetrievedChunk] = []
 
         for search_result in search_results:
 
             # ----------------------------------------------
-            # 2.1 SearchResult -> Chunk
+            # 2.1 DenseRetrieverResult -> Chunk
             # ----------------------------------------------
 
             chunk = chunk_store.get(
@@ -100,15 +100,15 @@ class RAGHydrator:
                 )
 
             # ----------------------------------------------
-            # 2.3 组合完整 RetrievedChunk
+            # 2.3 组合完整 RagRetrievedChunk
             # ----------------------------------------------
 
-            retrieved_chunk = RetrievedChunk(
+            retrieved_chunk = RagRetrievedChunk(
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
                 content=chunk.content,
                 source=document.file_name,
-                score=search_result.score,
+                retrieval_rank=search_result.dense_rank,
             )
 
             retrieved_chunks.append(

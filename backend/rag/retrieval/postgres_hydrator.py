@@ -1,6 +1,6 @@
 from backend.rag.contracts import (
-    RetrievedChunk,
-    SearchResult,
+    DenseRetrieverResult,
+    RagRetrievedChunk,
 )
 from backend.rag.retrieval.repositories import (
     ChunkRepository,
@@ -14,7 +14,7 @@ class PostgreSQLHydrator:
 
     职责：
 
-    SearchResult[]
+    DenseRetrieverResult[]
         ↓
     ChunkRepository 批量查询 Chunk
         ↓
@@ -22,9 +22,9 @@ class PostgreSQLHydrator:
         ↓
     一致性检查
         ↓
-    按 SearchResult 顺序恢复 Ranking
+    按 DenseRetrieverResult 顺序恢复 Ranking
         ↓
-    RetrievedChunk[]
+    RagRetrievedChunk[]
 
     不负责：
     - Query Embedding
@@ -45,8 +45,8 @@ class PostgreSQLHydrator:
 
     def hydrate(
         self,
-        search_results: list[SearchResult],
-    ) -> list[RetrievedChunk]:
+        search_results: list[DenseRetrieverResult],
+    ) -> list[RagRetrievedChunk]:
 
         # ==========================================
         # 1. Empty Retrieval 是合法状态
@@ -56,7 +56,7 @@ class PostgreSQLHydrator:
             return []
 
         # ==========================================
-        # 2. 提取 SearchResult 中的 chunk_id
+        # 2. 提取 DenseRetrieverResult 中的 chunk_id
         # ==========================================
 
         chunk_ids = [
@@ -90,7 +90,7 @@ class PostgreSQLHydrator:
         if missing_chunk_ids:
             raise KeyError(
                 "Hydration failed: "
-                "SearchResult references missing chunks: "
+                "DenseRetrieverResult references missing chunks: "
                 f"{missing_chunk_ids}"
             )
 
@@ -139,7 +139,7 @@ class PostgreSQLHydrator:
         # 8. Order Preservation + Hydration
         # ==========================================
 
-        retrieved_chunks: list[RetrievedChunk] = []
+        retrieved_chunks: list[RagRetrievedChunk] = []
 
         for search_result in search_results:
 
@@ -152,12 +152,12 @@ class PostgreSQLHydrator:
             ]
 
             retrieved_chunks.append(
-                RetrievedChunk(
+                RagRetrievedChunk(
                     chunk_id=chunk.chunk_id,
                     document_id=chunk.document_id,
                     content=chunk.content,
                     source=document.file_name,
-                    score=search_result.score,
+                    retrieval_rank=search_result.dense_rank,
                 )
             )
 

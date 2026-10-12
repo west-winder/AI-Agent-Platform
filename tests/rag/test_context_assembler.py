@@ -1,7 +1,7 @@
 from backend.rag.context_assembler import ContextAssembler
 from backend.rag.contracts import (
     AssembledContext,
-    RetrievedChunk,
+    RagRetrievedChunk,
 )
 
 
@@ -13,19 +13,19 @@ def test_assemble_returns_valid_context():
     assembler = ContextAssembler()
 
     chunks = [
-        RetrievedChunk(
+        RagRetrievedChunk(
             chunk_id="chunk_1",
             document_id="doc_1",
             content="Content A",
             source="a.md",
-            score=0.95,
+            retrieval_rank=1,
         ),
-        RetrievedChunk(
+        RagRetrievedChunk(
             chunk_id="chunk_2",
             document_id="doc_2",
             content="Content B",
             source="b.pdf",
-            score=0.80,
+            retrieval_rank=2,
         ),
     ]
 
@@ -68,20 +68,20 @@ def test_assemble_preserves_chunk_order():
 
     assembler = ContextAssembler()
 
-    chunk_high = RetrievedChunk(
+    chunk_high = RagRetrievedChunk(
         chunk_id="chunk_high",
         document_id="doc_1",
         content="High relevance content",
         source="high.md",
-        score=0.95,
+        retrieval_rank=1,
     )
 
-    chunk_low = RetrievedChunk(
+    chunk_low = RagRetrievedChunk(
         chunk_id="chunk_low",
         document_id="doc_2",
         content="Low relevance content",
         source="low.md",
-        score=0.60,
+        retrieval_rank=2,
     )
 
     result = assembler.assemble(
@@ -108,25 +108,25 @@ def test_assemble_preserves_chunk_order():
 
 def test_assemble_uses_expected_context_format():
     """
-    每个 RetrievedChunk 对应一个独立 Context Block。
+    每个 RagRetrievedChunk 对应一个独立 Context Block。
     """
 
     assembler = ContextAssembler()
 
     chunks = [
-        RetrievedChunk(
+        RagRetrievedChunk(
             chunk_id="chunk_1",
             document_id="doc_1",
             content="Content A",
             source="a.md",
-            score=0.95,
+            retrieval_rank=1,
         ),
-        RetrievedChunk(
+        RagRetrievedChunk(
             chunk_id="chunk_2",
             document_id="doc_2",
             content="Content B",
             source="b.pdf",
-            score=0.80,
+            retrieval_rank=2,
         ),
     ]
 
@@ -156,18 +156,18 @@ def test_assemble_exposes_citation_handle_but_not_internal_metadata():
     - content
 
     不允许：
-    - score
+    - retrieval_rank
     - document_id
     """
 
     assembler = ContextAssembler()
 
-    chunk = RetrievedChunk(
+    chunk = RagRetrievedChunk(
         chunk_id="internal_chunk_123",
         document_id="internal_doc_456",
         content="Visible knowledge",
         source="manual.pdf",
-        score=0.876543,
+        retrieval_rank=4210,
     )
 
     result = assembler.assemble([chunk])
@@ -182,4 +182,4 @@ def test_assemble_exposes_citation_handle_but_not_internal_metadata():
 
     # 系统内部 Metadata
     assert "internal_doc_456" not in context
-    assert "0.876543" not in context
+    assert "4210" not in context

@@ -2,9 +2,9 @@ import pytest
 
 from backend.rag.contracts import (
     Chunk,
+    DenseRetrieverResult,
     Document,
-    RetrievedChunk,
-    SearchResult,
+    RagRetrievedChunk,
 )
 from backend.rag.retrieval.hydrator import RAGHydrator
 
@@ -13,27 +13,29 @@ def test_hydrate_returns_complete_retrieved_chunks_in_order():
     """
     正常路径：
 
-    SearchResult
+    DenseRetrieverResult
         ↓
     Chunk
         ↓
     Document
         ↓
-    RetrievedChunk
+    RagRetrievedChunk
 
-    同时必须保持 SearchResult 原有 Ranking 顺序。
+    同时必须保持 DenseRetrieverResult 原有 Ranking 顺序。
     """
 
     hydrator = RAGHydrator()
 
     search_results = [
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_2",
-            score=0.95,
+            dense_score=0.95,
+            dense_rank=1,
         ),
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_1",
-            score=0.80,
+            dense_score=0.80,
+            dense_rank=2,
         ),
     ]
 
@@ -72,7 +74,7 @@ def test_hydrate_returns_complete_retrieved_chunks_in_order():
     assert len(results) == 2
 
     assert all(
-        isinstance(result, RetrievedChunk)
+        isinstance(result, RagRetrievedChunk)
         for result in results
     )
 
@@ -83,11 +85,11 @@ def test_hydrate_returns_complete_retrieved_chunks_in_order():
     # 检查 Hydration 后的数据是否完整
     assert results[0].content == "Content B"
     assert results[0].source == "b.pdf"
-    assert results[0].score == 0.95
+    assert results[0].retrieval_rank == 1
 
     assert results[1].content == "Content A"
     assert results[1].source == "a.md"
-    assert results[1].score == 0.80
+    assert results[1].retrieval_rank == 2
 
 
 def test_hydrate_empty_results_returns_empty_list():
@@ -108,7 +110,7 @@ def test_hydrate_empty_results_returns_empty_list():
 
 def test_hydrate_raises_when_chunk_is_missing():
     """
-    SearchResult 指向不存在的 Chunk：
+    DenseRetrieverResult 指向不存在的 Chunk：
 
     属于 Retrieval / Storage Consistency Failure，
     不能静默 skip。
@@ -117,9 +119,10 @@ def test_hydrate_raises_when_chunk_is_missing():
     hydrator = RAGHydrator()
 
     search_results = [
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="missing_chunk",
-            score=0.90,
+            dense_score=0.90,
+            dense_rank=1,
         )
     ]
 
@@ -136,15 +139,16 @@ def test_hydrate_raises_when_document_is_missing():
     Chunk 指向不存在的 Document：
 
     属于数据一致性错误，
-    不能生成不完整 RetrievedChunk。
+    不能生成不完整 RagRetrievedChunk。
     """
 
     hydrator = RAGHydrator()
 
     search_results = [
-        SearchResult(
+        DenseRetrieverResult(
             chunk_id="chunk_1",
-            score=0.90,
+            dense_score=0.90,
+            dense_rank=1,
         )
     ]
 

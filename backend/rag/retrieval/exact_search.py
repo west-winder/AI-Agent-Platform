@@ -1,6 +1,6 @@
 import numpy as np
 
-from backend.rag.contracts import SearchResult
+from backend.rag.contracts import DenseRetrieverResult
 
 
 class ExactDenseSearch:
@@ -15,7 +15,7 @@ class ExactDenseSearch:
         ↓
     按相似度排序
         ↓
-    返回 Top-K SearchResult
+    返回 Top-K DenseRetrieverResult
 
     本组件不负责：
 
@@ -32,7 +32,7 @@ class ExactDenseSearch:
         query_vector: np.ndarray,
         chunk_vectors: dict[str, np.ndarray],
         top_k: int = 5,
-    ) -> list[SearchResult]:
+    ) -> list[DenseRetrieverResult]:
         """
         对 Query Vector 与所有 Chunk Vector 做 Exact Search。
 
@@ -44,10 +44,11 @@ class ExactDenseSearch:
                 chunk_id -> embedding vector 的显式映射。
 
             top_k:
-                最多返回多少个 SearchResult。
+                最多返回多少个 DenseRetrieverResult。
 
         返回：
-            按 score 从高到低排列的 SearchResult。
+            按 dense_score 从高到低排列的 DenseRetrieverResult
+            （含 1-based dense_rank）。
         """
 
         # --------------------------------------------------
@@ -85,7 +86,7 @@ class ExactDenseSearch:
         # 4. 逐个计算 Chunk Similarity
         # --------------------------------------------------
 
-        results: list[SearchResult] = []
+        scored: list[tuple[str, float]] = []
 
         for chunk_id, chunk_vector in chunk_vectors.items():
 
@@ -111,27 +112,34 @@ class ExactDenseSearch:
                 chunk_vector,
             )
 
-            results.append(
-                SearchResult(
-                    chunk_id=chunk_id,
-                    score=score,
-                )
-            )
+            scored.append((chunk_id, score))
 
         # --------------------------------------------------
         # 5. Ranking
         # --------------------------------------------------
 
-        results.sort(
-            key=lambda item: item.score,
+        # score 降序；list.sort 稳定，保留原插入顺序作为 tie-break，
+        # 与迁移前的排序行为一致。
+        scored.sort(
+            key=lambda item: item[1],
             reverse=True,
         )
 
         # --------------------------------------------------
-        # 6. Top-K
+        # 6. Top-K + 1-based dense_rank
         # --------------------------------------------------
 
-        return results[:top_k]
+        return [
+            DenseRetrieverResult(
+                chunk_id=chunk_id,
+                dense_score=score,
+                dense_rank=rank,
+            )
+            for rank, (chunk_id, score) in enumerate(
+                scored[:top_k],
+                start=1,
+            )
+        ]
 
     @staticmethod
     def _validate_vector(

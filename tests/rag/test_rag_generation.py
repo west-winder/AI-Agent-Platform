@@ -7,7 +7,7 @@ import backend.rag.generation as generation_module
 from backend.rag.contracts import (
     AssembledContext,
     RAGGenerationOutput,
-    RetrievedChunk,
+    RagRetrievedChunk,
 )
 
 
@@ -16,18 +16,18 @@ def build_retrieved_chunk(
     chunk_id: str = "doc_1_chunk_0",
     content: str = "FastAPI supports async endpoints.",
     source: str = "knowledge.txt",
-) -> RetrievedChunk:
-    return RetrievedChunk(
+) -> RagRetrievedChunk:
+    return RagRetrievedChunk(
         chunk_id=chunk_id,
         document_id="doc_1",
         content=content,
         source=source,
-        score=0.95,
+        retrieval_rank=1,
     )
 
 
 def build_context(
-    chunks: list[RetrievedChunk],
+    chunks: list[RagRetrievedChunk],
 ) -> AssembledContext:
 
     if not chunks:

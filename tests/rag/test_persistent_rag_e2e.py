@@ -14,7 +14,7 @@ from backend.rag.contracts import Document
 from backend.rag.ingestion.rag_ingestion import (
     RAGIngestionService,
 )
-from backend.rag.retrieval.postgres_vector_search import (
+from backend.rag.retrieval.dense_retriever import (
     PostgreSQLVectorSearch,
 )
 from backend.rag.retrieval.repositories import (
@@ -249,16 +249,13 @@ def test_persistent_ingestion_to_retrieval(
     )
 
     # --------------------------------------------------
-    # 6. Assert Similarity
+    # 6. Assert Ranking
     # --------------------------------------------------
 
     assert [
-        item.score
+        item.retrieval_rank
         for item in results
-    ] == pytest.approx(
-        [
-            1.0,
-            0.8,
-        ],
-        abs=1e-5,
-    )
+    ] == [
+        1,
+        2,
+    ]

@@ -11,7 +11,7 @@ from backend.database.database import Base, engine
 from backend.models.rag_document import DocumentORM
 from backend.models.rag_chunk import ChunkORM
 from backend.models.rag_chunk_embedding import ChunkEmbeddingORM
-from backend.rag.retrieval.postgres_vector_search import (
+from backend.rag.retrieval.dense_retriever import (
     EmbeddingCompatibilityError,
     PostgreSQLVectorSearch,
 )
@@ -145,7 +145,9 @@ def test_exact_search_ranking(session_factory):
         "chunk_3",
     ]
 
-    assert [r.score for r in results] == pytest.approx(
+    assert [
+        r.dense_score for r in results
+    ] == pytest.approx(
         [1.0, 0.8, 0.0],
         abs=1e-5,
     )

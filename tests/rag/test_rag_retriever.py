@@ -41,7 +41,7 @@ def test_retrieve_runs_complete_retrieval_pipeline():
         ↓
     Hydration
         ↓
-    RetrievedChunk[]
+    RagRetrievedChunk[]
     """
 
     retriever = RAGRetriever(

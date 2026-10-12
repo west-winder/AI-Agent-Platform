@@ -15,7 +15,7 @@ from backend.rag.contracts import Document
 from backend.rag.ingestion.rag_ingestion import (
     RAGIngestionService,
 )
-from backend.rag.retrieval.postgres_vector_search import (
+from backend.rag.retrieval.dense_retriever import (
     PostgreSQLVectorSearch,
 )
 from backend.rag.retrieval.repositories import (
@@ -257,7 +257,8 @@ def test_real_qwen_persistent_rag_smoke(
         print(
             f"Rank {rank}: "
             f"source={result.source}, "
-            f"score={result.score:.6f}"
+            f"retrieval_rank="
+            f"{result.retrieval_rank}"
         )
         print(
             f"content={result.content}"

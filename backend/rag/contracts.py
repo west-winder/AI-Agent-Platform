@@ -43,17 +43,22 @@ class Chunk(BaseModel):
         return value
 
 
-class SearchResult(BaseModel):
+class DenseRetrieverResult(BaseModel):
     """
-    Exact Search 的轻量检索结果。
+    Dense Retriever 的检索与排序结果。
 
     只表示：
-    - 找到了哪个 Chunk
-    - 该 Chunk 的检索分数是多少
+    - 命中了哪个 Chunk
+    - Dense Retrieval 的相似度分数
+    - Dense Retrieval 的业务排名（1-based）
+
+    不暴露 Query Vector / Chunk Vector 等向量实现细节，
+    向量计算完全封装在 Dense Retriever 内部。
     """
 
     chunk_id: str
-    score: float
+    dense_score: float
+    dense_rank: int
 
     @field_validator("chunk_id")
     @classmethod
@@ -63,18 +68,22 @@ class SearchResult(BaseModel):
         return value
 
 
-class RetrievedChunk(BaseModel):
+class RagRetrievedChunk(BaseModel):
     """
-    SearchResult 完成 Hydration 后得到的完整检索结果。
+    Retrieval + Ranking + Hydration 之后得到的完整 RAG 检索结果。
 
-    它已经包含下游 ContextAssembler 消费所需要的信息。
+    它已经包含下游 ContextAssembler 消费所需要的信息，
+    不代表 Retriever 的原始输出。
+
+    retrieval_rank:
+        该 Chunk 在 Retrieval 阶段的业务排名（1-based）。
     """
 
     chunk_id: str
     document_id: str
     content: str
     source: str
-    score: float
+    retrieval_rank: int
 
     @field_validator(
         "chunk_id",
@@ -89,6 +98,46 @@ class RetrievedChunk(BaseModel):
         return value
 
 
+class FusedRetrieverResult(BaseModel):
+    """
+    Hybrid Retrieval（Dense + BM25 -> RRF）融合结果的占位契约。
+
+    当前只提供定义，不提供实现。
+    """
+
+    chunk_id: str
+    dense_score: float
+    dense_rank: int
+    bm25_score: float | None = None
+    bm25_rank: int | None = None
+    rrf_score: float
+    rrf_rank: int
+
+
+class RerankDocument(BaseModel):
+    """
+    Reranker 输入文档的占位契约。
+
+    当前只提供定义，不提供实现。
+    """
+
+    chunk_id: str
+    content: str
+
+
+class RerankedResult(BaseModel):
+    """
+    Reranker 输出结果的占位契约。
+
+    当前只提供定义，不提供实现。
+    """
+
+    chunk_id: str
+    previous_rank: int
+    rerank_score: float
+    rerank_rank: int
+
+
 class AssembledContext(BaseModel):
     """
     ContextAssembler 的输出。
@@ -97,12 +146,12 @@ class AssembledContext(BaseModel):
         真正交给 LLM 的 Document Context。
 
     used_chunks:
-        实际参与 Context Assembly 的完整 RetrievedChunk，
+        实际参与 Context Assembly 的完整 RagRetrievedChunk，
         用于 Citation、Debug 和后续 Evaluation。
     """
 
     context_text: str
-    used_chunks: list[RetrievedChunk]
+    used_chunks: list[RagRetrievedChunk]
 
 
 class RAGGenerationOutput(BaseModel):
@@ -153,7 +202,7 @@ class RAGAnswer(BaseModel):
 
     sources:
         Backend 根据 supporting_chunk_ids
-        从真实 RetrievedChunk 中解析出的来源。
+        从真实 RagRetrievedChunk 中解析出的来源。
     """
 
     answer: str

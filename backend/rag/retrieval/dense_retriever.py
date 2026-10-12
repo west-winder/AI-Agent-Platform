@@ -11,7 +11,7 @@ from backend.models.rag_document import DocumentORM
 from backend.models.rag_chunk import ChunkORM
 from backend.models.rag_chunk_embedding import ChunkEmbeddingORM
 
-from backend.rag.contracts import SearchResult
+from backend.rag.contracts import DenseRetrieverResult
 
 
 class EmbeddingCompatibilityError(RuntimeError):
@@ -28,7 +28,7 @@ class PostgreSQLVectorSearch:
     3. 使用 pgvector 计算 Cosine Distance
     4. 执行 Ranking + Top-K
     5. Distance -> Similarity
-    6. 返回 SearchResult[]
+    6. 返回 DenseRetrieverResult[]（含 1-based dense_rank）
 
     不负责：
     - Query Embedding
@@ -49,7 +49,7 @@ class PostgreSQLVectorSearch:
         query_vector: np.ndarray,
         embedding_model: str,
         top_k: int = 5,
-    ) -> list[SearchResult]:
+    ) -> list[DenseRetrieverResult]:
 
         # ==========================================
         # 1. 参数校验
@@ -161,9 +161,14 @@ class PostgreSQLVectorSearch:
         # 5. 转换为 Application Contract
         # ==========================================
 
-        results: list[SearchResult] = []
+        results: list[DenseRetrieverResult] = []
 
-        for chunk_id, score in rows:
+        # SQL 已按 distance 升序（即 similarity 降序）排序，
+        # 因此行位置就是 1-based 的业务排名。
+        for rank, (chunk_id, score) in enumerate(
+            rows,
+            start=1,
+        ):
 
             if score is None or not math.isfinite(float(score)):
                 raise ValueError(
@@ -172,9 +177,10 @@ class PostgreSQLVectorSearch:
                 )
 
             results.append(
-                SearchResult(
+                DenseRetrieverResult(
                     chunk_id=chunk_id,
-                    score=float(score),
+                    dense_score=float(score),
+                    dense_rank=rank,
                 )
             )
 
