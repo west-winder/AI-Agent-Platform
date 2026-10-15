@@ -374,3 +374,41 @@ def test_accepts_numpy_numeric_score():
         0.7,
         abs=1e-6,
     )
+
+
+
+
+class CountMismatchReranker:
+    """模拟底层 Reranker 返回数量不符合输入数量。"""
+
+    def __init__(self, returned_count):
+        self.returned_count = returned_count
+
+    def rerank(self, query, texts):
+        return [
+            FakeRerankItem(
+                index=index,
+                score=float(self.returned_count - index),
+            )
+            for index in range(self.returned_count)
+        ]
+
+
+@pytest.mark.parametrize("returned_count", [0, 1, 3])
+def test_raises_when_result_count_mismatches(
+    returned_count,
+):
+    adapter = RerankerAdapter(
+        CountMismatchReranker(returned_count)
+    )
+
+    documents = build_documents(
+        ("chunk_1", "Content A"),
+        ("chunk_2", "Content B"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="reranker result count mismatch",
+    ):
+        adapter.rerank("query", documents)

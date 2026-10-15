@@ -166,9 +166,19 @@ class RerankerAdapter:
         - 必须 finite（拒绝 NaN / inf）
         """
 
+        # 1. 首先检查结果数量完整性
+        if len(raw_results) != document_count:
+            raise ValueError(
+                "reranker result count mismatch: "
+                f"expected {document_count}, "
+                f"got {len(raw_results)}"
+            )
+
+         # 2. 再逐个检查 index 和 score
         seen_indexes: set[int] = set()
 
         for item in raw_results:
+
 
             index = item.index
 

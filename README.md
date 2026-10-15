@@ -1,8 +1,8 @@
 # AI Agent Platform
 
-基于 **FastAPI + PostgreSQL + DeepSeek + Gradio** 构建的 AI Agent 应用平台。
+基于 **FastAPI + PostgreSQL / pgvector + DeepSeek + Gradio** 构建的 AI Agent 应用平台。
 
-当前版本：
+已完成的版本里程碑：
 
 **v0.3 — PostgreSQL Runtime Baseline + Backend / LLM I/O Foundation**
 
@@ -45,7 +45,7 @@ Deployment
 ## Current Stage
 
 ```text
-v0.3
+当前 main 分支开发进度（历史版本里程碑：v0.3）
 
 Stage 0 — Memory + PostgreSQL
 COMPLETE
@@ -54,6 +54,9 @@ Stage 1 — Backend + LLM I/O Foundation
 COMPLETE
 
 Stage 2 — Unified RAG
+COMPLETE / FROZEN
+
+Stage 3 — Tool Calling + Minimal Agent Loop
 NEXT
 ```
 
@@ -195,6 +198,7 @@ Memory System 内部进一步拆分为：
 ### Database
 
 - PostgreSQL 18
+- pgvector（RAG 向量持久化与精确向量检索）
 - psycopg3（SQLAlchemy driver：`postgresql+psycopg`）
 
 ### LLM
@@ -210,6 +214,7 @@ Memory System 内部进一步拆分为：
 
 - Memory Dense Retrieval
 - Memory Similarity Search
+- RAG 文档切块与查询的向量化
 
 ### Reranker
 
@@ -226,6 +231,11 @@ Memory System 内部进一步拆分为：
 - jieba
 - bm25s
 - Reciprocal Rank Fusion（RRF）
+
+RAG 已实现文档摄入（RAG Ingestion）与混合检索（Hybrid Retrieval）：
+TXT / Markdown / PDF 解析、Chunking、Embedding、PostgreSQL / pgvector 持久化，
+以及 Dense + BM25 → RRF → Reranker。RAG 的 BM25 使用独立的纯 Python 实现，
+默认正则分词，可注入 jieba；Memory 的 BM25 使用 bm25s + jieba。
 
 ### Frontend
 
@@ -276,6 +286,13 @@ AI_Agent_Platform
 │   │       └── memory_lifecycle.py
 │   │
 │   ├── models
+│   ├── rag
+│   │   ├── ingestion
+│   │   ├── retrieval
+│   │   ├── contracts.py
+│   │   ├── context_assembler.py
+│   │   └── generation.py
+│   │
 │   ├── reranking
 │   │   └── reranker.py
 │   │
@@ -295,9 +312,11 @@ AI_Agent_Platform
 │   ├── async
 │   ├── frontend
 │   ├── logging
-│   └── memory
+│   ├── memory
+│   └── rag
 │
 ├── docs
+│   ├── rag_design.md
 │   └── testing
 │
 ├── requirements.txt
@@ -1256,6 +1275,20 @@ Dense / BM25 / RRF / Reranker 也完全不知道 Memory Lifecycle。
 
 ---
 
+## Unified RAG（Stage 2）
+
+核心链路已完成，Phase 7 Finalization 已完成，Stage 2 正式冻结：
+
+- 文档摄入：TXT / Markdown / PDF 解析、固定字符长度切块、批量 Embedding 与原子持久化。
+- 混合检索：查询向量化后顺序执行 Dense、BM25，经 RRF 融合与 Reranker 重排，再补全正文与来源。
+- 上下文与生成：组装文档上下文，通过结构化 LLM 输出生成回答；后端校验引用 ID 并解析真实来源。
+- 确定性验证：检索链路、排序契约、数据补全一致性、引用完整性与异常传播。
+
+RAG 尚未接入 ChatService、Agent Loop 或前端，也没有文件上传前端入口。
+组件契约、失败策略、评估边界与当前限制见 [RAG 设计文档](docs/rag_design.md)。
+
+---
+
 ## Testing
 
 tests/ 按领域组织：
@@ -1266,7 +1299,8 @@ tests/
 ├── async      → LLM I/O 契约（Timeout / Retry / Error）
 ├── frontend   → 前端错误语义契约
 ├── logging    → 日志契约
-└── memory     → Memory Read / Write / Lifecycle
+├── memory     → Memory Read / Write / Lifecycle
+└── rag        → Ingestion / Retrieval / Hydration / Context / Generation
 ```
 
 测试分为三类：
@@ -1546,9 +1580,13 @@ http://127.0.0.1:7860
 
 - 用户登录认证
 - JWT / RBAC
-- pgvector（当前 Dense Retrieval 为进程内暴力检索）
-- Unified RAG Knowledge Base
-- 文件上传与文档解析
+- 文件上传前端入口
+- RAG 与 ChatService / Agent Loop / 前端的集成
+- Conversation 与 Document 的作用域管理
+- 独立持久化 Sparse Index（稀疏索引）；BM25 仍依赖调用方提供 `chunk_store`
+- Query Rewrite（查询改写）/ ANN（近似最近邻检索）/ Multi-hop Retrieval（多跳检索）
+- Hybrid Retrieval 单路异常自动降级
+- 完整自动化 Faithfulness Evaluation（回答忠实度评估）
 - Tool Calling
 - Agent Loop
 - LangGraph Workflow
@@ -1628,32 +1666,38 @@ Question Presupposition
 
 ## Roadmap
 
-### v0.4 — Stage 2: Unified RAG（NEXT）
+### Stage 2 — Unified RAG（Completed / Frozen）
 
-将 Memory Retrieval 中验证过的 Hybrid 架构推广为统一 RAG 能力：
+核心能力与 Phase 7 Finalization 已完成，Stage 2 正式冻结：
 
-- Document Upload
-- Parsing
+- 后端文件摄入与 Parsing
 - Chunking
 - Embedding
 - Vector Retrieval
 - Hybrid Retrieval（Dense + BM25 + RRF）
 - Reranking
-- Knowledge Context Injection
+- 文档上下文组装、Generation 与后端引用校验
+- 文档同步与阶段收尾
 
 ---
 
-### Tool Calling
+### Stage 3 — Tool Calling + Minimal Agent Loop
 
-让 Agent 能够调用真实外部工具。
+下一阶段计划：
+
+- Tool Calling
+- Minimal Agent Loop
+- MCP 基础
+- Agent Evaluation 基础
+
+计划通过 Tool Contract（工具契约）将 RAG 接入 Agent Runtime（智能体运行时），尚未实现。
 
 ---
 
-### Agent Loop / Workflow
+### Stage 4 — LangGraph + Workflow
 
 进一步学习和实现：
 
-- Agent Loop
 - LangGraph
 - Workflow State
 - Multi-step Agent
@@ -1692,7 +1736,7 @@ Question Presupposition
 
 ## Version
 
-Current:
+已完成的历史版本里程碑：
 
 ```text
 v0.3
@@ -1705,6 +1749,9 @@ PostgreSQL Runtime Baseline
 +
 Stage 1 — Backend + LLM I/O Foundation
 ```
+
+当前 main 分支的 Stage 2 Unified RAG 已完成并正式冻结，Phase 7 Finalization 已完成；
+上述开发进度不代表已发布新的正式版本。
 
 ---
 
