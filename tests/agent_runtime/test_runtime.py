@@ -16,9 +16,12 @@ from backend.agent_runtime.contracts import (
     LLMRequest,
     LLMResponse,
     LLMToolCall,
+    LLMToolDefinition,
 )
 from backend.agent_runtime.errors import LLMProtocolError, LLMResponseTruncatedError
 from backend.agent_runtime.runtime import AgentRuntime
+from backend.agent_runtime.context_builder import ContextBudget, ContextBuilder, estimate_input_tokens
+from backend.agent_runtime.errors import ContextBudgetExceededError, ContextInputError
 from backend.exceptions.external_exceptions import ExternalTimeoutError
 from backend.tools.infrastructure.contracts import RegisteredTool, ToolContext
 from backend.tools.infrastructure.dispatcher import ToolDispatcher
@@ -298,3 +301,98 @@ def test_structured_logs_exclude_message_and_arguments(components, caplog) -> No
     assert record.iteration == 1
     assert record.tool_name == "echo"
     assert record.tool_status == "success"
+
+
+def test_context_trimming_preserves_history_and_fixed_start_across_tool_rounds(components) -> None:
+    """每轮重新构造 Context，完整 History 和请求起点不受裁剪影响。"""
+    class RecordingBuilder(ContextBuilder):
+        def __init__(self) -> None:
+            """记录独立快照而非 Runtime 的可变 History 引用。"""
+            super().__init__(ContextBudget(5000, 0, 0))
+            self.snapshots = []
+
+        def build(self, history, tools, current_turn_start):
+            """记录每轮输入再执行实际裁剪。"""
+            self.snapshots.append((deepcopy(history), current_turn_start))
+            return super().build(history, tools, current_turn_start)
+
+    builder = RecordingBuilder()
+    llm = FakeLLM(
+        tool_response(call("a", "一"), call("b", "二")),
+        tool_response(call("c", "三")), LLMResponse("完成", "stop"),
+        LLMResponse("新 Run", "stop"),
+    )
+    registry, dispatcher, _, _ = components
+    runtime = AgentRuntime(llm, registry, dispatcher, context_builder=builder)
+    messages = [LLMMessage("system", "系统"), LLMMessage("user", "旧" * 3000),
+                LLMMessage("assistant", "旧回答"), LLMMessage("user", "当前问题")]
+    original = deepcopy(messages)
+    first = asyncio.run(runtime.run(messages, ToolContext()))
+    assert [start for _, start in builder.snapshots] == [3, 3, 3]
+    assert [len(history) for history, _ in builder.snapshots] == [4, 7, 9]
+    assert [len(request.messages) for request in llm.requests] == [2, 5, 7]
+    assert llm.requests[2].messages == [messages[0], *first.messages[3:-1]]
+    assert first.messages[:4] == messages == original
+    assert len(first.messages) == 10
+    second = asyncio.run(runtime.run([LLMMessage("user", "下一次")], ToolContext()))
+    assert second.messages == [LLMMessage("user", "下一次"), LLMMessage("assistant", "新 Run")]
+    assert builder.snapshots[-1][1] == 0
+    assert llm.requests[-1].messages == [LLMMessage("user", "下一次")]
+
+
+def test_context_budget_failure_before_first_llm_call(components) -> None:
+    """必要内容超额直接抛错，不调用模型、工具或泄露消息。"""
+    llm = FakeLLM()
+    registry, dispatcher, _, _ = components
+    runtime = AgentRuntime(llm, registry, dispatcher,
+                           context_builder=ContextBuilder(ContextBudget(1, 0, 0)))
+    with pytest.raises(ContextBudgetExceededError) as raised:
+        asyncio.run(runtime.run([LLMMessage("user", "private-question")], ToolContext()))
+    assert "private-question" not in str(raised.value)
+    assert llm.requests == []
+    dispatcher.dispatch.assert_not_awaited()
+
+
+def test_tool_result_overflow_stops_before_next_llm_call(components) -> None:
+    """本轮工具正常执行后，下一轮超额不再调用模型且不重试。"""
+    registry, dispatcher, _, _ = components
+    messages = [LLMMessage("user", "问题")]
+    tools = [LLMToolDefinition("echo", "回声测试", EchoArgs.model_json_schema())]
+    budget = ContextBudget(estimate_input_tokens(messages, tools), 0, 0)
+    llm = FakeLLM(tool_response(call()))
+    runtime = AgentRuntime(llm, registry, dispatcher, context_builder=ContextBuilder(budget))
+    with pytest.raises(ContextBudgetExceededError):
+        asyncio.run(runtime.run(messages, ToolContext()))
+    assert len(llm.requests) == 1
+    dispatcher.dispatch.assert_awaited_once()
+    assert messages == [LLMMessage("user", "问题")]
+
+
+@pytest.mark.parametrize("messages", [
+    [LLMMessage("system", "系统")], [LLMMessage("user", " ")],
+    [LLMMessage("user", "问题"), LLMMessage("assistant", "回答")],
+    [LLMMessage("user", "问题"), LLMMessage("assistant", tool_calls=[call()])],
+])
+def test_invalid_current_request_rejected_before_model_and_tools(components, messages) -> None:
+    """不接受缺失请求起点、已完成请求或悬空工具调用的输入。"""
+    llm = FakeLLM()
+    with pytest.raises(ContextInputError):
+        asyncio.run(make_runtime(llm, components).run(messages, ToolContext()))
+    assert llm.requests == []
+    components[1].dispatch.assert_not_awaited()
+
+
+def test_history_that_initially_fits_is_trimmed_after_tool_result(components) -> None:
+    """工具结果增长后才触发裁剪，后续请求仍保留当前调用及结果。"""
+    registry, dispatcher, _, _ = components
+    messages = [LLMMessage("user", "x" * 1000), LLMMessage("assistant", "旧答"),
+                LLMMessage("user", "新问题")]
+    tools = [LLMToolDefinition("echo", "回声测试", EchoArgs.model_json_schema())]
+    budget = ContextBudget(estimate_input_tokens(messages, tools), 0, 0)
+    llm = FakeLLM(tool_response(call()), LLMResponse("完成", "stop"))
+    runtime = AgentRuntime(llm, registry, dispatcher, context_builder=ContextBuilder(budget))
+    result = asyncio.run(runtime.run(messages, ToolContext()))
+    assert llm.requests[0].messages == messages
+    assert llm.requests[1].messages == result.messages[2:-1]
+    assert [message.role for message in llm.requests[1].messages] == ["user", "assistant", "tool"]
+    assert result.messages[:3] == messages

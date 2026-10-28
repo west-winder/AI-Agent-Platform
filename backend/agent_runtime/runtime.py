@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import logging
 
+from backend.agent_runtime.context_builder import ContextBuilder, find_current_turn_start
 from backend.agent_runtime.contracts import (
     AgentRunResult,
     AgentRunStatus,
@@ -27,23 +28,32 @@ class AgentRuntime:
         registry: ToolRegistry,
         dispatcher: ToolDispatcher,
         max_iterations: int = 5,
+        *,
+        context_builder: ContextBuilder | None = None,
     ) -> None:
+        """注入模型、工具与上下文构造器，保留原有位置参数兼容性。"""
         if type(max_iterations) is not int or max_iterations < 1:
             raise ValueError("max_iterations must be a positive integer")
         self._llm = llm
         self._registry = registry
         self._dispatcher = dispatcher
         self._max_iterations = max_iterations
+        self._context_builder = (
+            context_builder if context_builder is not None else ContextBuilder()
+        )
 
     async def run(
         self,
         messages: list[LLMMessage],
         tool_context: ToolContext,
     ) -> AgentRunResult:
+        """执行一次标准用户请求；维护完整 History，每次调用构造独立 Context。"""
         if not messages:
             raise ValueError("messages must not be empty")
         # list 的浅拷贝不足以隔离嵌套 arguments 和 tool_calls。
         history = deepcopy(messages)
+        # 起点仅在 Run 开始时确定，后续工具调用不会改变它。
+        current_turn_start = find_current_turn_start(history)
         tools = [
             LLMToolDefinition(
                 name=tool.name,
@@ -54,9 +64,10 @@ class AgentRuntime:
         ]
 
         for iteration in range(1, self._max_iterations + 1):
+            context = self._context_builder.build(history, tools, current_turn_start)
             # 每次请求是快照；自定义 LLMPort 不会意外修改 Runtime 历史。
             response = await self._llm.complete(
-                LLMRequest(messages=deepcopy(history), tools=deepcopy(tools))
+                LLMRequest(messages=deepcopy(context), tools=deepcopy(tools))
             )
             validate_llm_response(response)
             logger.info(

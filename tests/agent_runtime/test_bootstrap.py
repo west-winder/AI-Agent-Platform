@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from backend.agent_runtime.bootstrap import build_agent_runtime
 from backend.agent_runtime.contracts import AgentRunStatus, LLMMessage, LLMResponse
 from backend.agent_runtime.deepseek_adapter import DeepSeekAdapter
+from backend.agent_runtime.context_builder import ContextBudget, ContextBuilder
+from backend.agent_runtime.errors import ContextBudgetExceededError
 from backend.tools.infrastructure.contracts import RegisteredTool, ToolContext
 from backend.tools.infrastructure.dispatcher import ToolDispatcher
 from backend.tools.infrastructure.registry import ToolRegistry
@@ -117,3 +119,32 @@ def test_partial_adapter_overrides_preserve_explicit_values(monkeypatch, legacy_
 def test_conflicting_injected_llm_and_adapter_configuration_rejected(option) -> None:
     with pytest.raises(ValueError, match="cannot be combined"):
         build_agent_runtime(llm=SimpleNamespace(), **option)
+
+
+def test_context_builder_default_and_explicit_injection() -> None:
+    """Bootstrap 创建默认实例，也允许注入指定构造器。"""
+    llm = SimpleNamespace(complete=AsyncMock(return_value=LLMResponse("完成", "stop")))
+    default = build_agent_runtime(llm=llm, registry=ToolRegistry())
+    assert isinstance(default._context_builder, ContextBuilder)
+    builder = ContextBuilder()
+    runtime = build_agent_runtime(llm=llm, registry=ToolRegistry(), context_builder=builder)
+    assert runtime._context_builder is builder
+    result = asyncio.run(runtime.run([LLMMessage("user", "问题")], ToolContext()))
+    assert result.final_answer == "完成"
+
+
+def test_context_budget_configuration_applies_before_llm() -> None:
+    """组装层预算配置生效，超额不进入模型。"""
+    llm = SimpleNamespace(complete=AsyncMock())
+    runtime = build_agent_runtime(llm=llm, registry=ToolRegistry(),
+                                  context_budget=ContextBudget(1, 0, 0))
+    with pytest.raises(ContextBudgetExceededError):
+        asyncio.run(runtime.run([LLMMessage("user", "问题")], ToolContext()))
+    llm.complete.assert_not_awaited()
+
+
+def test_conflicting_context_configuration_rejected() -> None:
+    """避免预算参数被已注入的构造器静默忽略。"""
+    with pytest.raises(ValueError, match="cannot be combined"):
+        build_agent_runtime(llm=SimpleNamespace(), context_builder=ContextBuilder(),
+                            context_budget=ContextBudget())

@@ -48,16 +48,20 @@ Deployment
 当前 main 分支开发进度（历史版本里程碑：v0.3）
 
 Stage 0 — Memory + PostgreSQL
-COMPLETE
+COMPLETE / FROZEN
 
 Stage 1 — Backend + LLM I/O Foundation
-COMPLETE
+COMPLETE / FROZEN
 
 Stage 2 — Unified RAG
 COMPLETE / FROZEN
 
 Stage 3 — Tool Calling + Minimal Agent Loop
-NEXT
+IN PROGRESS
+
+Module 1–4 — COMPLETE
+Module 5 — State / Context — COMPLETE / FROZEN
+Module 6 — Error Handling / Retry / Limits — NEXT
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -1683,12 +1687,31 @@ Question Presupposition
 
 ### Stage 3 — Tool Calling + Minimal Agent Loop
 
-下一阶段计划：
+**IN PROGRESS**
 
-- Tool Calling
-- Minimal Agent Loop
-- MCP 基础
-- Agent Evaluation 基础
+| Module | 内容 | 状态 |
+| --- | --- | --- |
+| 1 | Tool Contract / Schema | COMPLETE |
+| 2 | Function Calling | COMPLETE |
+| 3 | Registry / Dispatcher | COMPLETE |
+| 4 | Minimal Agent Loop | COMPLETE |
+| 5 | State / Context | COMPLETE / FROZEN |
+| 6 | Error Handling / Retry / Limits | NEXT |
+| 7 | MCP 基础实践 | PLANNED |
+| 8 | Agent Evaluation + Basic Observability | PLANNED |
+
+Module 5 已完成 ContextBuilder V1：
+
+- Runtime 保留完整 History，每次 LLM 调用前独立构造新的 Model Context。
+- 自动识别并固定当前 User Message 起点，优先裁剪较早的完整对话轮次。
+- 保护所有 System Messages 和当前任务工具调用链，校验工具调用与结果关联。
+- 使用可配置的保守预算估算；必要信息超额时抛出明确异常，不调用该轮 LLM。
+- 不涉及数据库、Memory、RAG 或 ChatService 重构。
+
+已知限制：Token 估算不等于精确计数；裁剪旧对话可能损失语义背景；
+V1 不支持后台自主任务或断点恢复，未验证真实模型的极限上下文容量。
+详细接口、测试证据及既有测试环境问题见
+[ContextBuilder V1 验收报告](docs/testing/context_builder_v1_validation.md)。
 
 计划通过 Tool Contract（工具契约）将 RAG 接入 Agent Runtime（智能体运行时），尚未实现。
 
@@ -1751,6 +1774,7 @@ Stage 1 — Backend + LLM I/O Foundation
 ```
 
 当前 main 分支的 Stage 2 Unified RAG 已完成并正式冻结，Phase 7 Finalization 已完成；
+Stage 3 仍为 IN PROGRESS，Module 5 State / Context 已 COMPLETE / FROZEN，下一模块为 Module 6。
 上述开发进度不代表已发布新的正式版本。
 
 ---
