@@ -3,12 +3,20 @@
 import asyncio
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
+import errno
 import json
 import logging
 import math
+import ssl
+import socket
+import time
 from typing import Any
 
-from openai import APIError, AsyncOpenAI
+import httpcore2
+import httpx2
+from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from backend.agent_runtime.contracts import (
@@ -20,10 +28,101 @@ from backend.agent_runtime.contracts import (
     validate_tool_calls,
 )
 from backend.agent_runtime.errors import LLMProtocolError, LLMResponseTruncatedError
-from backend.exceptions.external_exceptions import ExternalServiceError
+from backend.exceptions.external_exceptions import ExternalServiceError, ExternalTimeoutError
 
 logger = logging.getLogger(__name__)
 ErrorTranslator = Callable[[TimeoutError | APIError], ExternalServiceError]
+
+
+@dataclass(frozen=True)
+class LLMRetryDecision:
+    """Agent 边界的分类结果；None 表示不授权 Runtime 重试。"""
+
+    category: str
+    delay_seconds: float | None = None
+    status_code: int | None = None
+
+
+def classify_llm_error(error: Exception) -> LLMRetryDecision:
+    """只读取现有原因链；不改变共享异常或 SDK 的重试策略。"""
+    if isinstance(error, ExternalTimeoutError):
+        return LLMRetryDecision("timeout", 0.0, getattr(error.__cause__, "status_code", None))
+    if not isinstance(error, ExternalServiceError):
+        return LLMRetryDecision("unclassified")
+    cause = error.__cause__
+    if isinstance(cause, APIStatusError):
+        status = cause.status_code
+        if 500 <= status < 600:
+            return LLMRetryDecision("server", 0.0, status)
+        if status == 429:
+            headers = cause.response.headers
+            delay = None
+            try:
+                if "retry-after-ms" in headers:
+                    delay = float(headers["retry-after-ms"]) / 1000
+                elif "retry-after" in headers:
+                    value = headers["retry-after"]
+                    try:
+                        delay = float(value)
+                    except ValueError:
+                        date = parsedate_to_datetime(value)
+                        if date.tzinfo is not None:
+                            delay = date.timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError, OSError):
+                pass
+            # 与已安装 SDK 的最大服务端等待提示保持一致；预算仍由 Runtime 检查。
+            if delay is not None and math.isfinite(delay) and 0 <= delay <= 120:
+                return LLMRetryDecision("rate_limit", delay, status)
+            return LLMRetryDecision("rate_limit", status_code=status)
+        return LLMRetryDecision("http_non_retryable", status_code=status)
+    if isinstance(cause, APIConnectionError):
+        source = cause.__cause__
+        # SDK 也会包装任意程序异常；要求存在明确的网络错误来源。
+        if isinstance(source, (httpx2.ConnectError, httpx2.ConnectTimeout, httpx2.ReadError, httpx2.WriteError)):
+            require_transient_root = isinstance(source, (httpx2.ReadError, httpx2.WriteError))
+            # Read/Write 的泛化 ConnectionError 必须经过 errno 白名单核验。
+            known_os_types = (
+                (ConnectionResetError, ConnectionRefusedError, ConnectionAbortedError, BrokenPipeError, TimeoutError)
+                if require_transient_root else (ConnectionError, TimeoutError)
+            )
+            seen: set[int] = set()
+            while source is not None and id(source) not in seen:
+                seen.add(id(source))
+                if isinstance(source, (
+                    httpcore2.ConnectError, httpcore2.ConnectTimeout, httpcore2.ReadError, httpcore2.WriteError,
+                )):
+                    if source.__cause__ is None:
+                        return LLMRetryDecision("unclassified_connection")
+                    source = source.__cause__
+                    continue
+                if type(source) is OSError and source.errno is None and source.__cause__ is not None:
+                    # AnyIO 包装不单独授予重试权限，继续检查真实底层原因。
+                    source = source.__cause__
+                    continue
+                # Read/Write 包装必须最终落到已有策略允许的 OS 原因，不能止于类型标签。
+                if require_transient_root and source.__cause__ is None and not isinstance(source, OSError):
+                    return LLMRetryDecision("unclassified_connection")
+                if isinstance(source, ssl.SSLError) or not isinstance(
+                    source, (httpx2.NetworkError, httpx2.ConnectTimeout, ConnectionError, OSError)
+                ):
+                    return LLMRetryDecision("unclassified_connection")
+                if isinstance(source, socket.gaierror):
+                    if source.errno != socket.EAI_AGAIN:
+                        return LLMRetryDecision("unclassified_connection")
+                elif isinstance(source, OSError) and not isinstance(source, known_os_types):
+                    transient = {
+                        errno.ECONNRESET, errno.ECONNREFUSED, errno.ECONNABORTED,
+                        errno.ETIMEDOUT, errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EPIPE,
+                        # Windows Winsock 错误码。
+                        10054, 10061, 10053, 10060, 10065, 10051,
+                    }
+                    if source.errno not in transient:
+                        return LLMRetryDecision("unclassified_connection")
+                source = source.__cause__
+            if source is None:
+                return LLMRetryDecision("connection", 0.0)
+        return LLMRetryDecision("unclassified_connection")
+    return LLMRetryDecision("unclassified")
 
 
 def _reject_json_constant(value: str) -> None:

@@ -61,7 +61,7 @@ IN PROGRESS
 
 Module 1–4 — COMPLETE
 Module 5 — State / Context — COMPLETE / FROZEN
-Module 6 — Error Handling / Retry / Limits — NEXT
+Module 6 — Error Handling / Retry / Limits — COMPLETE (V1)
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -1696,7 +1696,7 @@ Question Presupposition
 | 3 | Registry / Dispatcher | COMPLETE |
 | 4 | Minimal Agent Loop | COMPLETE |
 | 5 | State / Context | COMPLETE / FROZEN |
-| 6 | Error Handling / Retry / Limits | NEXT |
+| 6 | Error Handling / Retry / Limits | COMPLETE (V1) |
 | 7 | MCP 基础实践 | PLANNED |
 | 8 | Agent Evaluation + Basic Observability | PLANNED |
 
@@ -1712,6 +1712,23 @@ Module 5 已完成 ContextBuilder V1：
 V1 不支持后台自主任务或断点恢复，未验证真实模型的极限上下文容量。
 详细接口、测试证据及既有测试环境问题见
 [ContextBuilder V1 验收报告](docs/testing/context_builder_v1_validation.md)。
+
+Module 6 已完成 Error Handling / Retry / Limits V1：
+
+- 保留共享 SDK 的有限重试；Agent Runtime 最多额外重试一次 LLM 调用。
+- 每次逻辑 LLM 调用共享 180 秒单调时钟截止时间，包含两次尝试及重试等待。
+- 按原因链保守分类；429 必须有有效、有限且符合剩余预算的等待提示。
+- 连接分类识别可信的 httpx2/httpcore2 包装并继续核验底层原因；包装本身不授予重试权限。
+- 工具默认不自动重试，`retryable=True` 不代表执行授权。仅 Weather 的地理编码
+  和天气只读 GET 在工具内部显式授权，分别最多两次 HTTP 尝试。
+- Weather 只自动恢复确认的瞬时连接故障及 HTTP 408/500/502/503/504；
+  保留每次请求的 10 秒 HTTP 分阶段超时，429、其他 4xx、协议或数据错误不自动重试。
+- 保留取消、最终异常、结构化 ToolFailure、上下文预算和两种 Run 终止状态；
+  LLM 恢复不会重放已执行工具，也不额外消耗逻辑迭代次数。
+
+V1 不增加 Run 总超时、独立工具调用次数上限或统一 Dispatcher 重试/超时框架。
+Module 6 验收与全仓既有测试问题分别记录，详见
+[Module 6 V1 验收报告](docs/testing/module6_v1_validation.md)。Module 7 尚未开始。
 
 计划通过 Tool Contract（工具契约）将 RAG 接入 Agent Runtime（智能体运行时），尚未实现。
 
@@ -1774,7 +1791,8 @@ Stage 1 — Backend + LLM I/O Foundation
 ```
 
 当前 main 分支的 Stage 2 Unified RAG 已完成并正式冻结，Phase 7 Finalization 已完成；
-Stage 3 仍为 IN PROGRESS，Module 5 State / Context 已 COMPLETE / FROZEN，下一模块为 Module 6。
+Stage 3 仍为 IN PROGRESS，Module 5 State / Context 已 COMPLETE / FROZEN，
+Module 6 Error Handling / Retry / Limits 已 COMPLETE (V1)，下一模块为尚未开始的 Module 7。
 上述开发进度不代表已发布新的正式版本。
 
 ---

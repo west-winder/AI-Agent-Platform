@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from typing import Annotated, Any
 
+import httpcore2
 import httpx2
 from pydantic import (
     BaseModel,
@@ -80,35 +81,74 @@ def _invalid_response() -> ToolExecutionError:
     )
 
 
+def _transient_connection_error(exc: httpx2.RequestError) -> bool:
+    """仅授权可确认的连接故障；协议、TLS 和未知底层异常不自动恢复。"""
+    if not isinstance(exc, (httpx2.ConnectError, httpx2.ConnectTimeout)):
+        return False
+    source: BaseException | None = exc
+    seen: set[int] = set()
+    while source is not None and id(source) not in seen:
+        seen.add(id(source))
+        if isinstance(source, (httpcore2.ConnectError, httpcore2.ConnectTimeout)):
+            # 可信传输层包装本身不是瞬时故障证据，必须继续核对原因。
+            if source.__cause__ is None:
+                return False
+            source = source.__cause__
+            continue
+        if type(source) is OSError and source.errno is None and source.__cause__ is not None:
+            # AnyIO 的 "All connection attempts failed" 包装；最终原因仍须获准。
+            source = source.__cause__
+            continue
+        if not isinstance(source, (
+            httpx2.ConnectError, httpx2.ConnectTimeout, ConnectionRefusedError,
+            ConnectionResetError, ConnectionAbortedError, TimeoutError,
+        )):
+            return False
+        source = source.__cause__
+    return source is None
+
+
 async def _get_json(
     client: httpx2.AsyncClient,
     url: str,
     params: dict[str, str | int | float],
+    *,
+    allow_retry: bool = False,
 ) -> dict[str, Any]:
-    try:
-        response = await client.get(url, params=params)
-    except (
-        httpx2.TimeoutException,
-        httpx2.NetworkError,
-        httpx2.RemoteProtocolError,
-    ) as exc:
-        raise ToolExecutionError(
-            code="WEATHER_SERVICE_UNAVAILABLE",
-            message="天气服务暂时不可用，请稍后重试",
-            retryable=True,
-        ) from exc
-    except httpx2.DecodingError as exc:
-        raise _invalid_response() from exc
+    # 仅这两个已审查的只读 GET 路径获准；不依据 ToolErrorInfo.retryable 授权。
+    authorized = allow_retry and url in (_GEOCODING_URL, _WEATHER_URL)
+    for attempt in range(2 if authorized else 1):
+        try:
+            response = await client.get(url, params=params)
+        except (
+            httpx2.TimeoutException,
+            httpx2.NetworkError,
+            httpx2.RemoteProtocolError,
+        ) as exc:
+            if authorized and attempt == 0 and _transient_connection_error(exc):
+                continue
+            raise ToolExecutionError(
+                code="WEATHER_SERVICE_UNAVAILABLE",
+                message="天气服务暂时不可用，请稍后重试",
+                retryable=True,
+            ) from exc
+        except httpx2.DecodingError as exc:
+            raise _invalid_response() from exc
 
-    try:
-        response.raise_for_status()
-    except httpx2.HTTPStatusError as exc:
-        retryable = response.status_code in (408, 429) or 500 <= response.status_code < 600
-        raise ToolExecutionError(
-            code="WEATHER_SERVICE_UNAVAILABLE",
-            message="天气服务暂时不可用，请稍后重试" if retryable else "天气服务请求失败",
-            retryable=retryable,
-        ) from exc
+        try:
+            response.raise_for_status()
+        except httpx2.HTTPStatusError as exc:
+            status = response.status_code
+            transient = status == 408 or 500 <= status < 600
+            if authorized and attempt == 0 and status in (408, 500, 502, 503, 504):
+                continue
+            retryable = status == 429 or transient
+            raise ToolExecutionError(
+                code="WEATHER_SERVICE_UNAVAILABLE",
+                message="天气服务暂时不可用，请稍后重试" if retryable else "天气服务请求失败",
+                retryable=retryable,
+            ) from exc
+        break
 
     try:
         payload = response.json()
@@ -124,13 +164,14 @@ async def get_weather_handler(
     args: WeatherArgs,
     context: ToolContext,
 ) -> dict[str, Any]:
-    """查询城市首个匹配地点的当前天气；不注册工具，也不自动重试。"""
+    """查询当前天气；仅两个只读外部请求分别获准一次有限重试。"""
 
     async with httpx2.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
         geocoding = await _get_json(
             client,
             _GEOCODING_URL,
             {"name": args.city, "count": 1, "language": "zh", "format": "json"},
+            allow_retry=True,
         )
         # Open-Meteo 无匹配结果时可以省略 results 字段。
         matches = geocoding.get("results", [])
@@ -159,6 +200,7 @@ async def get_weather_handler(
                 "timezone": "auto",
                 "timeformat": "iso8601",
             },
+            allow_retry=True,
         )
         try:
             forecast = _WeatherResponse.model_validate(weather)

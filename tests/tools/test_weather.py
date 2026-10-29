@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+import httpcore2
 import httpx2
 import pytest
 from pydantic import ValidationError
@@ -16,6 +17,32 @@ from backend.tools.infrastructure.errors import ToolExecutionError
 
 _GEOCODING_HOST = "geocoding-api.open-meteo.com"
 _WEATHER_HOST = "api.open-meteo.com"
+
+
+def mapped_core_connection(core_type, root_kind):
+    """使用真实依赖的异常映射，保留 core 与底层异常两级原因。"""
+    import ssl
+    from httpx2._transports.default import map_httpcore_exceptions
+
+    roots = {
+        "refused": ConnectionRefusedError(10061, "temporary refusal"),
+        "timeout": TimeoutError("temporary timeout"),
+        "tls": ssl.SSLCertVerificationError("certificate"),
+        "permission": PermissionError(13, "permission"),
+        "bug": AttributeError("bug"),
+        "unknown": OSError("unknown"),
+    }
+    root = roots.get(root_kind)
+    if root_kind in ("aggregate_refused", "aggregate_bug"):
+        root = OSError("All connection attempts failed")
+        root.__cause__ = roots["refused" if root_kind == "aggregate_refused" else "bug"]
+    core = core_type("transport failure")
+    core.__cause__ = core if root_kind == "cycle" else root
+    try:
+        with map_httpcore_exceptions():
+            raise core
+    except httpx2.RequestError as mapped:
+        return mapped
 
 
 @pytest.fixture
@@ -397,7 +424,7 @@ def test_weather_invalid_values_are_rejected(
 
 @pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST], ids=["geocoding", "weather"])
 @pytest.mark.parametrize("error_type", [httpx2.ReadTimeout, httpx2.ConnectError])
-def test_network_failures_are_retryable_without_automatic_retry(
+def test_network_error_metadata_does_not_authorize_every_error_for_retry(
     mock_http,
     geocoding_payload: dict[str, Any],
     stage: str,
@@ -420,13 +447,16 @@ def test_network_failures_are_retryable_without_automatic_retry(
         retryable=True,
     )
     assert isinstance(raised.value.__cause__, error_type)
-    assert len(requests) == (1 if stage == _GEOCODING_HOST else 2)
+    attempts = 2 if error_type is httpx2.ConnectError else 1
+    assert len(requests) == attempts + (0 if stage == _GEOCODING_HOST else 1)
 
 
 @pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST], ids=["geocoding", "weather"])
 @pytest.mark.parametrize(
     ("status", "retryable"),
-    [(429, True), (503, True), (408, True), (400, False)],
+    [(429, True), (500, True), (502, True), (503, True), (504, True), (408, True),
+     (501, True), (505, True), (599, True),
+     (400, False), (401, False), (403, False), (409, False), (422, False)],
 )
 def test_http_status_errors_have_explicit_retry_policy(
     mock_http,
@@ -452,7 +482,8 @@ def test_http_status_errors_have_explicit_retry_policy(
         retryable=retryable,
     )
     assert isinstance(raised.value.__cause__, httpx2.HTTPStatusError)
-    assert len(requests) == (1 if stage == _GEOCODING_HOST else 2)
+    attempts = 2 if status in (408, 500, 502, 503, 504) else 1
+    assert len(requests) == attempts + (0 if stage == _GEOCODING_HOST else 1)
 
 
 @pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST], ids=["geocoding", "weather"])
@@ -513,4 +544,235 @@ def test_programming_error_propagates_unchanged(mock_http) -> None:
         query_weather()
 
     assert raised.value is error
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST])
+@pytest.mark.parametrize("failure", ["connect", "connect_timeout", 408, 503])
+def test_authorized_query_recovers_once_and_keeps_timeout(
+    mock_http, geocoding_payload, weather_payload, stage, failure,
+) -> None:
+    failures = []
+    success = json_responses(geocoding_payload, weather_payload)
+
+    def respond(request):
+        if request.url.host == stage and not failures:
+            failures.append(request)
+            if failure == "connect":
+                raise httpx2.ConnectError("temporary", request=request)
+            if failure == "connect_timeout":
+                raise httpx2.ConnectTimeout("temporary", request=request)
+            return httpx2.Response(failure, json={})
+        return success(request)
+
+    requests = mock_http(respond)
+    result = query_weather()
+    assert result["current"]["temperature_c"] == 25.5
+    assert len(requests) == 3
+    repeated = [r for r in requests if r.url.host == stage]
+    assert len(repeated) == 2
+    assert repeated[0].url == repeated[1].url
+    assert all(r.method == "GET" for r in requests)
+    assert all(r.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 10.0) for r in requests)
+
+
+@pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST])
+@pytest.mark.parametrize("error_type", [httpx2.ConnectTimeout, httpx2.ReadTimeout, httpx2.WriteTimeout, httpx2.PoolTimeout])
+def test_timeouts_have_finite_attempts_and_preserve_final_cause(mock_http, geocoding_payload, stage, error_type) -> None:
+    failures = []
+
+    def respond(request):
+        if request.url.host == stage:
+            error = error_type(f"timeout-{len(failures)}", request=request)
+            failures.append(error)
+            raise error
+        return httpx2.Response(200, json=geocoding_payload)
+
+    requests = mock_http(respond)
+    with pytest.raises(ToolExecutionError) as raised:
+        query_weather()
+    expected = 2 if error_type is httpx2.ConnectTimeout else 1
+    assert len(failures) == expected
+    assert raised.value.__cause__ is failures[-1]
+    assert raised.value.code == "WEATHER_SERVICE_UNAVAILABLE"
+    assert raised.value.retryable is True
+    assert all(r.extensions["timeout"]["connect"] == 10 for r in requests)
+    assert all(r.extensions["timeout"]["read"] == 10 for r in requests)
+
+
+@pytest.mark.parametrize("url,authorize", [(weather._GEOCODING_URL, None), (weather._GEOCODING_URL, False),
+                                         ("https://unapproved.invalid/query", True)])
+def test_retry_requires_both_explicit_authorization_and_reviewed_path(url, authorize) -> None:
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx2.Response(503, json={})
+
+    async def scenario():
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond), timeout=10) as client:
+            kwargs = {} if authorize is None else {"allow_retry": authorize}
+            with pytest.raises(ToolExecutionError) as raised:
+                await weather._get_json(client, url, {}, **kwargs)
+            assert raised.value.retryable is True
+
+    asyncio.run(scenario())
+    assert len(requests) == 1
+
+
+def test_both_query_paths_have_independent_two_attempt_limits(mock_http, geocoding_payload, weather_payload) -> None:
+    counts = {_GEOCODING_HOST: 0, _WEATHER_HOST: 0}
+    success = json_responses(geocoding_payload, weather_payload)
+
+    def respond(request):
+        counts[request.url.host] += 1
+        if counts[request.url.host] == 1:
+            return httpx2.Response(503, json={})
+        return success(request)
+
+    requests = mock_http(respond)
+    assert query_weather()["source"] == "Open-Meteo"
+    assert list(counts.values()) == [2, 2]
+    assert len(requests) == 4
+
+
+@pytest.mark.parametrize("root", [AttributeError("bug"), RuntimeError("bug")])
+def test_wrapped_unknown_connection_failure_is_not_retried(mock_http, root) -> None:
+    error = httpx2.ConnectError("connection")
+    error.__cause__ = root
+
+    def respond(request):
+        raise error
+
+    requests = mock_http(respond)
+    with pytest.raises(ToolExecutionError) as raised:
+        query_weather()
+    assert raised.value.__cause__ is error
+    assert raised.value.__cause__.__cause__ is root
+    assert len(requests) == 1
+
+
+def test_second_failure_controls_final_error_without_third_attempt(mock_http) -> None:
+    errors = []
+
+    def respond(request):
+        status = 503 if not errors else 403
+        errors.append(status)
+        return httpx2.Response(status, json={})
+
+    requests = mock_http(respond)
+    with pytest.raises(ToolExecutionError) as raised:
+        query_weather()
+    assert errors == [503, 403]
+    assert len(requests) == 2
+    assert raised.value.retryable is False
+    assert raised.value.__cause__.response.status_code == 403
+
+
+@pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST])
+@pytest.mark.parametrize("attempt", [1, 2])
+@pytest.mark.parametrize("failure", ["status", "core"])
+def test_weather_active_cancellation_is_not_translated_or_retried(monkeypatch, geocoding_payload, stage, attempt, failure) -> None:
+    async def scenario():
+        entered = asyncio.Event()
+        requests = []
+        stage_calls = []
+
+        async def respond(request):
+            requests.append(request)
+            if request.url.host != stage:
+                return httpx2.Response(200, json=geocoding_payload)
+            stage_calls.append(request)
+            if len(stage_calls) < attempt:
+                if failure == "core":
+                    raise mapped_core_connection(httpcore2.ConnectError, "refused")
+                return httpx2.Response(503, json={})
+            entered.set()
+            await asyncio.Event().wait()
+
+        real_client = httpx2.AsyncClient
+        clients = []
+
+        def factory(**kwargs):
+            client = real_client(transport=httpx2.MockTransport(respond), trust_env=False, **kwargs)
+            clients.append(client)
+            return client
+
+        monkeypatch.setattr(weather.httpx2, "AsyncClient", factory)
+        task = asyncio.create_task(weather.get_weather_handler(weather.WeatherArgs(city="武汉"), ToolContext()))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert len(stage_calls) == attempt
+        assert len(requests) == attempt + (stage == _WEATHER_HOST)
+        assert all(c.is_closed for c in clients)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stage", [_GEOCODING_HOST, _WEATHER_HOST])
+@pytest.mark.parametrize("core_type,root", [(httpcore2.ConnectError, "refused"),
+                                         (httpcore2.ConnectTimeout, "timeout"),
+                                         (httpcore2.ConnectError, "aggregate_refused")])
+@pytest.mark.parametrize("recover", [True, False])
+def test_core_connection_chain_recovers_or_preserves_final_failure(
+    mock_http, geocoding_payload, weather_payload, stage, core_type, root, recover,
+) -> None:
+    failures = []
+    success = json_responses(geocoding_payload, weather_payload)
+
+    def respond(request):
+        if request.url.host == stage and (not recover or not failures):
+            error = mapped_core_connection(core_type, root)
+            failures.append(error)
+            raise error
+        return success(request)
+
+    requests = mock_http(respond)
+    if recover:
+        assert query_weather()["current"]["temperature_c"] == 25.5
+        assert len(failures) == 1
+    else:
+        with pytest.raises(ToolExecutionError) as raised:
+            query_weather()
+        assert raised.value.__cause__ is failures[-1]
+        assert raised.value.retryable is True
+        assert len(failures) == 2
+    assert sum(r.url.host == stage for r in requests) == 2
+    assert isinstance(failures[0].__cause__, core_type)
+    assert all(r.extensions["timeout"]["read"] == 10 for r in requests)
+
+
+@pytest.mark.parametrize("core_type", [httpcore2.ConnectError, httpcore2.ConnectTimeout])
+@pytest.mark.parametrize("root", ["tls", "permission", "bug", "unknown", "missing", "cycle", "aggregate_bug"])
+def test_core_connection_chain_rejects_unsafe_or_unknown_causes(mock_http, core_type, root) -> None:
+    error = mapped_core_connection(core_type, root)
+
+    def respond(request):
+        raise error
+
+    requests = mock_http(respond)
+    with pytest.raises(ToolExecutionError) as raised:
+        query_weather()
+    assert raised.value.__cause__ is error
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("core_type,root", [(httpcore2.ConnectError, "refused"), (httpcore2.ConnectTimeout, "timeout")])
+@pytest.mark.parametrize("authorize", [None, False])
+def test_core_connection_chain_does_not_grant_tool_authorization(core_type, root, authorize) -> None:
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        raise mapped_core_connection(core_type, root)
+
+    async def scenario():
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond), timeout=10) as client:
+            kwargs = {} if authorize is None else {"allow_retry": authorize}
+            with pytest.raises(ToolExecutionError):
+                await weather._get_json(client, weather._GEOCODING_URL, {}, **kwargs)
+
+    asyncio.run(scenario())
     assert len(requests) == 1
