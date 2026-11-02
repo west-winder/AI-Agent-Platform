@@ -1,0 +1,90 @@
+{
+  "recorded_at": "2026-11-02T15:13:06.169614+08:00",
+  "versions": {
+    "mcp": "1.26.0",
+    "httpx": "0.28.1",
+    "httpcore": "1.0.9",
+    "pydantic": "2.13.4"
+  },
+  "server_entry": "python -B -m web_page_fetch",
+  "server_components_replaced": false,
+  "public_attempts": [
+    {
+      "target": "https://example.com/",
+      "isError": false,
+      "seconds": 0.938,
+      "structuredContent_preview": {
+        "title": "Example Domain",
+        "url": "https://example.com/",
+        "content": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+        "truncated": false,
+        "content_type": "text/html"
+      },
+      "content_characters": 156,
+      "preview_only": false,
+      "production_dns_and_verified_https_completed": true
+    }
+  ],
+  "negative_cases": [
+    {
+      "case": "invalid_url",
+      "isError": true,
+      "error_code": "INVALID_URL"
+    },
+    {
+      "case": "localhost",
+      "isError": true,
+      "error_code": "TARGET_NOT_ALLOWED"
+    },
+    {
+      "case": "private_ip",
+      "isError": true,
+      "error_code": "TARGET_NOT_ALLOWED"
+    }
+  ],
+  "stage": "completed",
+  "initialize": {
+    "server_name": "Web Page Fetch MCP Server",
+    "protocol_version": "2025-11-25"
+  },
+  "tools": [
+    "fetch_web_page"
+  ],
+  "input_schema_checked": true,
+  "public_result_shape": {
+    "fields": [
+      "content",
+      "content_type",
+      "title",
+      "truncated",
+      "url"
+    ],
+    "title_is_example_domain": true
+  },
+  "tools_list_after_failures": true,
+  "public_success_after_failures": true,
+  "stderr_diagnostics": {
+    "lines": 3,
+    "allowed_lines": 3,
+    "contains_warning": false,
+    "contains_traceback": false,
+    "contains_url": false,
+    "warning_categories": [],
+    "warning_source_files": []
+  },
+  "mcp_log_notifications": 0,
+  "stderr": {
+    "only_fixed_error_codes": true,
+    "lines": [
+      "fetch_failed code=INVALID_URL",
+      "fetch_failed code=TARGET_NOT_ALLOWED",
+      "fetch_failed code=TARGET_NOT_ALLOWED"
+    ]
+  },
+  "server_exit_codes": [
+    0
+  ],
+  "forced_termination_calls": 0,
+  "public_fetch_passed": true,
+  "protocol_and_negative_cases_passed": true
+}
