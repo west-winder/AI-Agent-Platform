@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from backend.mcp_host.bootstrap import lifespan
 
 from backend.database.database import Base, engine
 from backend.models import agent as agent_model
@@ -24,7 +25,7 @@ configure_logging()
 # 初始化数据库表
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="AI Agent Backend")
+app = FastAPI(title="AI Agent Backend", lifespan=lifespan)
 
 # 注册路由
 app.include_router(chat_router.router)

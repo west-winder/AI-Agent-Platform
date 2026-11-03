@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "server_id": "web_page_fetch",
+      "enabled": true,
+      "command": "mcp_servers/web_page_fetch/.venv/Scripts/python.exe",
+      "args": ["-B", "-m", "web_page_fetch"],
+      "cwd": "mcp_servers/web_page_fetch",
+      "env": {"PYTHONUTF8": "1"},
+      "startup_timeout_seconds": 15,
+      "call_timeout_seconds": 40
+    }
+  ]
+}

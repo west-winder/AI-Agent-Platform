@@ -1,0 +1,26 @@
+{
+  "mcp": "1.26.0",
+  "jsonschema": "4.26.0",
+  "title": "Example Domain",
+  "content_characters": 156,
+  "fake_llm_calls": 2,
+  "failures": [
+    "MCP_TOOL_ERROR",
+    "MCP_TOOL_ERROR",
+    "MCP_TOOL_ERROR"
+  ],
+  "methods": [
+    "initialize",
+    "tools/list",
+    "tools/call",
+    "tools/call",
+    "tools/call",
+    "tools/call",
+    "tools/call"
+  ],
+  "returncodes": [
+    0
+  ],
+  "forced_terminations": 0,
+  "owner_tasks_finished": true
+}

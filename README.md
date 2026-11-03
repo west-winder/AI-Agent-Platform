@@ -62,6 +62,8 @@ IN PROGRESS
 Module 1–4 — COMPLETE
 Module 5 — State / Context — COMPLETE / FROZEN
 Module 6 — Error Handling / Retry / Limits — COMPLETE (V1)
+Module 7 — MCP Host Integration — COMPLETE / FROZEN
+Module 8 — Evaluation / Observability — NEXT
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -1697,8 +1699,8 @@ Question Presupposition
 | 4 | Minimal Agent Loop | COMPLETE |
 | 5 | State / Context | COMPLETE / FROZEN |
 | 6 | Error Handling / Retry / Limits | COMPLETE (V1) |
-| 7 | MCP 基础实践 | PLANNED |
-| 8 | Agent Evaluation + Basic Observability | PLANNED |
+| 7 | MCP Host Integration | COMPLETE / FROZEN |
+| 8 | Agent Evaluation + Basic Observability | NEXT |
 
 Module 5 已完成 ContextBuilder V1：
 
@@ -1728,7 +1730,21 @@ Module 6 已完成 Error Handling / Retry / Limits V1：
 
 V1 不增加 Run 总超时、独立工具调用次数上限或统一 Dispatcher 重试/超时框架。
 Module 6 验收与全仓既有测试问题分别记录，详见
-[Module 6 V1 验收报告](docs/testing/module6_v1_validation.md)。Module 7 尚未开始。
+[Module 6 V1 验收报告](docs/testing/module6_v1_validation.md)。
+
+Module 7 MCP Host Integration 已 **COMPLETE / FROZEN**：
+
+- 完成 MCP Host 基础架构、MCPClientManager 与 Session 生命周期。
+- 完成有限 JSON Schema → Pydantic 动态适配和 MCP Tool Adapter。
+- 完成 Host Bootstrap、Server 级原子注册与 Partial Availability。
+- 完成 FastAPI lifespan 集成和真实 stdio 工具调用。
+- 完成错误处理、资源清理、两项 P1 修复及专项评测。
+
+最终定点 Review 无新增 P0/P1；最新 MCP Host 150 项、Tool System 172 项，共 **322 passed，0 failures/errors/skipped**；pip check 和 git diff --check 通过。
+[架构](docs/mcp_host_integration/ARCHITECTURE.md)、[代码导读](docs/mcp_host_integration/READING_GUIDE.md)、
+[最终验收报告](docs/testing/module7_mcp_host_final_acceptance.md)记录接口、证据和冻结边界。
+
+首版使用 stdio 和静态 MCP Server 配置；不支持动态管理、自动重连或热更新，平台暂不提供 MCP Server 能力。Runtime 注入 app.state.agent_runtime，旧 `/chat`、`/chat/stream` 未切换到 AgentRuntime。Stage 3 仍为 IN PROGRESS，Module 8 Evaluation / Observability 为 NEXT，尚未开始实施。历史全仓测试问题保留在验证报告中，不混入本次专项验收结论。
 
 计划通过 Tool Contract（工具契约）将 RAG 接入 Agent Runtime（智能体运行时），尚未实现。
 
@@ -1792,7 +1808,8 @@ Stage 1 — Backend + LLM I/O Foundation
 
 当前 main 分支的 Stage 2 Unified RAG 已完成并正式冻结，Phase 7 Finalization 已完成；
 Stage 3 仍为 IN PROGRESS，Module 5 State / Context 已 COMPLETE / FROZEN，
-Module 6 Error Handling / Retry / Limits 已 COMPLETE (V1)，下一模块为尚未开始的 Module 7。
+Module 6 Error Handling / Retry / Limits 已 COMPLETE (V1)，Module 7 MCP Host Integration 已 COMPLETE / FROZEN，
+Module 8 Evaluation / Observability 为 NEXT，尚未启动；Stage 3 整体未完成。
 上述开发进度不代表已发布新的正式版本。
 
 ---
