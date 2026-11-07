@@ -1,0 +1,5 @@
+{
+  "mode": "DETERMINISTIC",
+  "max_iterations": 3,
+  "fake_llm_script_ref": "regression-v1"
+}

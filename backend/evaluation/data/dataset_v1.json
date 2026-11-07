@@ -1,0 +1,907 @@
+{
+  "schema_version": 1,
+  "purpose": "HARNESS_REGRESSION",
+  "cases": [
+    {
+      "case_id": "no_tool",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "What is the capital of France? Answer without using tools."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "run_status",
+          "evaluator_type": "RULE",
+          "criterion_type": "run_status",
+          "required": true,
+          "expected": "COMPLETED"
+        },
+        {
+          "criterion_id": "tool_not_called",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_not_called",
+          "required": true,
+          "expected": "get_weather"
+        }
+      ]
+    },
+    {
+      "case_id": "correct_tool",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_called",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_called",
+          "required": true,
+          "expected": "get_weather"
+        },
+        {
+          "criterion_id": "tool_arguments_match",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_arguments_match",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "arguments": {
+              "city": "Wuhan"
+            }
+          }
+        },
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        },
+        {
+          "criterion_id": "fixture_all_consumed",
+          "evaluator_type": "RULE",
+          "criterion_type": "fixture_all_consumed",
+          "required": true,
+          "expected": null
+        },
+        {
+          "criterion_id": "grounding",
+          "evaluator_type": "JUDGE",
+          "criterion_type": "grounding",
+          "required": false,
+          "expected": null,
+          "rubric": "PASS if the answer gives Wuhan's reference temperature in Celsius; FAIL for a conflicting value or omission."
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ],
+      "reference_facts": [
+        "The synthetic weather fixture records Wuhan at 21 C."
+      ]
+    },
+    {
+      "case_id": "wrong_tool",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_called",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_called",
+          "required": true,
+          "expected": "get_weather"
+        },
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "wrong_arguments",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_arguments_match",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_arguments_match",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "arguments": {
+              "city": "Wuhan"
+            }
+          }
+        },
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "multiple_calls",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to compare Wuhan and Beijing temperatures in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "wuhan_arguments",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_arguments_match",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "arguments": {
+              "city": "Wuhan"
+            }
+          }
+        },
+        {
+          "criterion_id": "beijing_arguments",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_arguments_match",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "arguments": {
+              "city": "Beijing"
+            }
+          }
+        },
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        },
+        {
+          "criterion_id": "fixture_all_consumed",
+          "evaluator_type": "RULE",
+          "criterion_type": "fixture_all_consumed",
+          "required": true,
+          "expected": null
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        },
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Beijing"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Beijing",
+              "location": {
+                "name": "Beijing",
+                "latitude": 39.9,
+                "longitude": 116.41,
+                "admin1": "Beijing",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 16,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "recover_after_tool_failure",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius. Retry the lookup if it fails."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_error",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "error"
+          }
+        },
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        },
+        {
+          "criterion_id": "fixture_all_consumed",
+          "evaluator_type": "RULE",
+          "criterion_type": "fixture_all_consumed",
+          "required": true,
+          "expected": null
+        },
+        {
+          "criterion_id": "fixture_no_violations",
+          "evaluator_type": "RULE",
+          "criterion_type": "fixture_no_violations",
+          "required": true,
+          "expected": null
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "error",
+            "error": {
+              "code": "WEATHER_UNAVAILABLE",
+              "message": "Fixture weather source unavailable",
+              "retryable": true
+            }
+          }
+        },
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "successful_tool_wrong_answer",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        },
+        {
+          "criterion_id": "grounding",
+          "evaluator_type": "JUDGE",
+          "criterion_type": "grounding",
+          "required": true,
+          "expected": null,
+          "rubric": "PASS if the answer gives Wuhan's reference temperature in Celsius; FAIL for a conflicting value or omission."
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ],
+      "reference_facts": [
+        "The synthetic weather fixture records Wuhan at 21 C."
+      ]
+    },
+    {
+      "case_id": "tool_failure_task_failure",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "error",
+            "error": {
+              "code": "WEATHER_UNAVAILABLE",
+              "message": "Fixture weather source unavailable",
+              "retryable": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "fixture_mismatch",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "fixture_no_violations",
+          "evaluator_type": "RULE",
+          "criterion_type": "fixture_no_violations",
+          "required": true,
+          "expected": null
+        },
+        {
+          "criterion_id": "tool_arguments_match",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_arguments_match",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "arguments": {
+              "city": "Wuhan"
+            }
+          }
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "fixture_exhausted",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius. One lookup is sufficient."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "fixture_no_violations",
+          "evaluator_type": "RULE",
+          "criterion_type": "fixture_no_violations",
+          "required": true,
+          "expected": null
+        },
+        {
+          "criterion_id": "tool_success",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_result_status",
+          "required": true,
+          "expected": {
+            "tool_name": "get_weather",
+            "status": "success"
+          }
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "max_iterations",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius. Stop once you have the temperature."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "run_status",
+          "evaluator_type": "RULE",
+          "criterion_type": "run_status",
+          "required": true,
+          "expected": "MAX_ITERATIONS_REACHED"
+        },
+        {
+          "criterion_id": "tool_called",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_called",
+          "required": true,
+          "expected": "get_weather"
+        },
+        {
+          "criterion_id": "tool_not_called",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_not_called",
+          "required": false,
+          "expected": "search_weather"
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        },
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "expected_runtime_exception",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "execution_status",
+          "evaluator_type": "RULE",
+          "criterion_type": "execution_status",
+          "required": true,
+          "expected": "RAISED"
+        },
+        {
+          "criterion_id": "expected_exception",
+          "evaluator_type": "RULE",
+          "criterion_type": "expected_exception",
+          "required": true,
+          "expected": {
+            "exception_type": "FakeLLMScriptExhausted"
+          }
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "reference_contradiction",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Give the museum's Sunday closing time and ticket price."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "grounding",
+          "evaluator_type": "JUDGE",
+          "criterion_type": "grounding",
+          "required": true,
+          "expected": null,
+          "rubric": "PASS if the answer includes both reference facts accurately; FAIL for omissions or contradictions."
+        }
+      ],
+      "reference_facts": [
+        "The fictional museum closes at 17:00 on Sunday.",
+        "A ticket costs 20 yuan."
+      ]
+    },
+    {
+      "case_id": "correct_without_tool_evidence",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use the weather tool to report the current temperature in Wuhan in Celsius."
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "tool_called",
+          "evaluator_type": "RULE",
+          "criterion_type": "tool_called",
+          "required": true,
+          "expected": "get_weather"
+        },
+        {
+          "criterion_id": "grounding",
+          "evaluator_type": "JUDGE",
+          "criterion_type": "grounding",
+          "required": false,
+          "expected": null,
+          "rubric": "PASS if the answer gives Wuhan's reference temperature in Celsius; FAIL for a conflicting value or omission."
+        }
+      ],
+      "tool_fixtures": [
+        {
+          "tool_name": "get_weather",
+          "arguments": {
+            "city": "Wuhan"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "requested_city": "Wuhan",
+              "location": {
+                "name": "Wuhan",
+                "latitude": 30.58,
+                "longitude": 114.27,
+                "admin1": "Hubei",
+                "country": "China",
+                "country_code": "CN",
+                "timezone": "Asia/Shanghai"
+              },
+              "current": {
+                "time": "2026-01-15T10:00",
+                "temperature_c": 21,
+                "relative_humidity_percent": 55,
+                "weather_code": 0
+              },
+              "source": "Open-Meteo"
+            }
+          }
+        }
+      ],
+      "reference_facts": [
+        "The synthetic reference records Wuhan at 21 C. The task also requires a tool lookup."
+      ]
+    },
+    {
+      "case_id": "judge_uncertainty",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Do Sunday visitors to the museum need a reservation?"
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "grounding",
+          "evaluator_type": "JUDGE",
+          "criterion_type": "grounding",
+          "required": true,
+          "expected": null,
+          "rubric": "Use UNDETERMINED if the reference neither confirms nor contradicts the reservation policy."
+        }
+      ],
+      "reference_facts": [
+        "The fictional museum opens on Sundays. No reservation policy is supplied."
+      ]
+    }
+  ]
+}
