@@ -1,6 +1,6 @@
 """Runtime 的只读观测契约；仅记录白名单中的标量元数据。"""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
@@ -10,6 +10,8 @@ from time import monotonic
 from types import MappingProxyType
 from typing import Protocol
 from uuid import uuid4
+
+from backend.agent_runtime.metrics import MetricsSnapshot, MetricsState
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +65,22 @@ class Observer(Protocol):
 
 
 class LoggingObserver:
-    """在现有日志格式内写 JSON 消息，不修改全局 Handler 或 Formatter。"""
+    """统一接收事件；独立隔离日志输出和内部 Metrics 更新。"""
+
+    def __init__(self) -> None:
+        self._metrics = MetricsState()
 
     def emit(self, event: ObservationEvent) -> None:
+        # 两个同步分支分别复用 B1 的安全边界，一路普通故障不阻止另一路。
+        _safely(lambda: self._write_log(event), event)
+        _safely(lambda: self._metrics.record(event), event)
+
+    def snapshot(self) -> MetricsSnapshot:
+        return self._metrics.snapshot()
+
+    @staticmethod
+    def _write_log(event: ObservationEvent) -> None:
+        # 只写 JSON 消息，不修改全局 Handler 或 Formatter。
         logger.info(json.dumps({
             "run_id": event.run_id,
             "event_type": event.event_type,
@@ -81,8 +96,12 @@ class NoOpObserver:
 
 def safe_emit(observer: Observer, event: ObservationEvent) -> None:
     """隔离普通观测故障及备用日志故障；取消等 BaseException 继续传播。"""
+    _safely(lambda: observer.emit(event), event)
+
+
+def _safely(action: Callable[[], None], event: ObservationEvent) -> None:
     try:
-        observer.emit(event)
+        action()
     except Exception as exc:
         try:
             logger.warning(
@@ -96,3 +115,12 @@ def safe_emit(observer: Observer, event: ObservationEvent) -> None:
             )
         except Exception:
             pass
+
+
+# 默认接线在本进程共享同一 Observer 和指标状态，而不是每个 Runtime/Run 新建。
+# 显式构造 LoggingObserver 可为测试或调用方提供独立作用域；NoOp 关闭两路观测。
+_default_observer = LoggingObserver()
+
+
+def get_default_observer() -> LoggingObserver:
+    return _default_observer

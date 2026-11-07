@@ -18,8 +18,9 @@ parent_llm_call_id 指向该轮 LLM 调用。跨 Run 查询工具时使用
 `(run_id, tool_call_id)`，因为不同 Run 的原始工具 ID 可能相同。
 
 `AgentRuntime(..., observer=...)` 和 `build_agent_runtime(observer=...)`
-支持关键字注入；省略或传 None 时使用 LoggingObserver，显式传 NoOpObserver
-时关闭新增观测。原位置参数、ContextBuilder、Registry 和 LLM 注入保持兼容；
+支持关键字注入；省略或传 None 时使用进程共享的默认 LoggingObserver，显式传 NoOpObserver
+时关闭新增观测。B2 在 Observer 内新增指标聚合，详见 [Metrics V1](metrics_v1.md)。
+原位置参数、ContextBuilder、Registry 和 LLM 注入保持兼容；
 MCP Host 无须改变现有调用方式。InMemoryObserver 仅存在于测试。
 
 ## 时间、不可变性与日志
@@ -51,6 +52,7 @@ parse_error、异常消息、原因链或 traceback。ID、工具名、error_cod
 | run.exception | error_type、elapsed_seconds |
 | run.cancelled | elapsed_seconds |
 | llm.started | llm_call_id、iteration |
+| llm.attempt_started（B2 增量） | llm_call_id、iteration、attempt |
 | llm.attempt_failed | llm_call_id、iteration、attempt、error_type、category、status_code、will_retry、elapsed_seconds、remaining_seconds、retry_delay_seconds |
 | llm.completed | llm_call_id、iteration、attempts、elapsed_seconds |
 | llm.exception | llm_call_id、iteration、attempts、error_type、elapsed_seconds |
@@ -68,8 +70,10 @@ llm.completed 表示 LLMPort 调用返回；保留 Runtime 随后的独立响应
 若自定义 LLMPort 返回无效响应，Runtime 校验失败仍产生 run.exception 并原样
 传播，不把校验移入重试边界。
 
-逻辑 LLM 调用数按 llm.started 计数；实际尝试数使用 LLM 终止事件的 attempts，
-其中包含成功和被取消的在途尝试。attempt 从 1 起算。这里的尝试指 Runtime
+逻辑 LLM 调用数按 llm.started 计数；B2 指标按新增 llm.attempt_started 计数实际
+请求尝试，终止事件仍保留原有 attempts 字段供诊断。请求准备失败时可能尚无实际请求，
+因此不从终态 attempts 推算 Metrics。成功和被取消的在途请求都属于实际尝试。
+attempt 从 1 起算。这里的尝试指 Runtime
 调用 LLMPort.complete 的次数，SDK 内部 HTTP 重试不单独观测。
 工具处理数按 tool.started 计数，成功/业务失败按 tool.completed 的 status 分组。
 

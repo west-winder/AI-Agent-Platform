@@ -63,7 +63,7 @@ Module 1–4 — COMPLETE
 Module 5 — State / Context — COMPLETE / FROZEN
 Module 6 — Error Handling / Retry / Limits — COMPLETE (V1)
 Module 7 — MCP Host Integration — COMPLETE / FROZEN
-Module 8 — Evaluation / Observability — NEXT
+Module 8 — Evaluation / Observability / Metrics — COMPLETE / FROZEN
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -1700,7 +1700,7 @@ Question Presupposition
 | 5 | State / Context | COMPLETE / FROZEN |
 | 6 | Error Handling / Retry / Limits | COMPLETE (V1) |
 | 7 | MCP Host Integration | COMPLETE / FROZEN |
-| 8 | Agent Evaluation + Basic Observability | NEXT |
+| 8 | Agent Evaluation + Basic Observability + Metrics | COMPLETE / FROZEN |
 
 Module 5 已完成 ContextBuilder V1：
 
@@ -1744,7 +1744,20 @@ Module 7 MCP Host Integration 已 **COMPLETE / FROZEN**：
 [架构](docs/mcp_host_integration/ARCHITECTURE.md)、[代码导读](docs/mcp_host_integration/READING_GUIDE.md)、
 [最终验收报告](docs/testing/module7_mcp_host_final_acceptance.md)记录接口、证据和冻结边界。
 
-首版使用 stdio 和静态 MCP Server 配置；不支持动态管理、自动重连或热更新，平台暂不提供 MCP Server 能力。Runtime 注入 app.state.agent_runtime，旧 `/chat`、`/chat/stream` 未切换到 AgentRuntime。Stage 3 仍为 IN PROGRESS，Module 8 Evaluation / Observability 为 NEXT，尚未开始实施。历史全仓测试问题保留在验证报告中，不混入本次专项验收结论。
+首版使用 stdio 和静态 MCP Server 配置；不支持动态管理、自动重连或热更新，平台暂不提供 MCP Server 能力。Runtime 注入 app.state.agent_runtime，旧 `/chat`、`/chat/stream` 未切换到 AgentRuntime。Module 8 已完成，Stage 3 仍为 IN PROGRESS，等待单独的阶段复盘与最终确认。历史全仓测试问题保留在验证报告中，不混入本次专项验收结论。
+
+Module 8 Evaluation / Observability / Metrics 已 **COMPLETE / FROZEN**：
+
+- Part A：Evaluation Offline V1 的 Runner、Engine、回归 Harness 和报告保持冻结；真实 Judge 校准仍为后续工作。
+- Part B1：每个 Run 独立追踪，关联逻辑 LLM Call 与原始 Tool Call，记录安全 JSON 事件，隔离观测故障。
+- Part B2：默认 Observer 在进程内共享，同时输出日志并聚合 10 项指标，两个分支独立隔离普通故障。
+- 实际请求开始事件区分逻辑 LLM 调用、实际尝试和已启动重试；工具业务失败与 Run 异常分别统计。
+- 固定累计 Histogram 桶和只读 Snapshot 支持耗时分析，不使用高基数 ID、工具名称或错误代码作指标标签。
+
+范围为轻量进程内 V1，不包含多进程汇总、远程指标、Dashboard 或完整生产监控。
+[指标目录](docs/metrics_catalog.md)、[B2 设计](docs/metrics_v1.md)、
+[Module 8 最终验收](docs/testing/module8_final_acceptance.md)和
+[Stage 3 状态记录](docs/stage3_status.md)记录统计口径、验收结果和冻结边界。
 
 计划通过 Tool Contract（工具契约）将 RAG 接入 Agent Runtime（智能体运行时），尚未实现。
 
@@ -1763,7 +1776,9 @@ Module 7 MCP Host Integration 已 **COMPLETE / FROZEN**：
 
 ### Observability / Evaluation
 
-在 Basic Logging V1 之上继续演进：
+Module 8 已完成 Offline Evaluation V1、Runtime Logging / Tracing 和 Process-local Metrics V1。
+默认进程 Observer 同时记录安全事件与累计指标，通过只读 Snapshot 读取。
+后续完整生产能力可继续演进：
 
 - Structured Logging
 - Tracing
@@ -1809,7 +1824,7 @@ Stage 1 — Backend + LLM I/O Foundation
 当前 main 分支的 Stage 2 Unified RAG 已完成并正式冻结，Phase 7 Finalization 已完成；
 Stage 3 仍为 IN PROGRESS，Module 5 State / Context 已 COMPLETE / FROZEN，
 Module 6 Error Handling / Retry / Limits 已 COMPLETE (V1)，Module 7 MCP Host Integration 已 COMPLETE / FROZEN，
-Module 8 Evaluation / Observability 为 NEXT，尚未启动；Stage 3 整体未完成。
+Module 8 Evaluation / Observability / Metrics 已 COMPLETE / FROZEN；Stage 3 整体复盘与最终确认尚未执行。
 上述开发进度不代表已发布新的正式版本。
 
 ---

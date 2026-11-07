@@ -141,14 +141,14 @@ def test_concurrent_runs_on_same_runtime_keep_all_associations_separate():
             assert UUID(run_id).version == 4
             events = [event for event in observer.events if event.run_id == run_id]
             assert [event.event_type for event in events] == [
-                "run.started", "llm.started", "llm.completed", "tool.started",
-                "tool.completed", "llm.started", "llm.completed", "run.finished",
+                "run.started", "llm.started", "llm.attempt_started", "llm.completed", "tool.started",
+                "tool.completed", "llm.started", "llm.attempt_started", "llm.completed", "run.finished",
             ]
             llm_ids = {event.attributes["llm_call_id"] for event in events if "llm_call_id" in event.attributes}
             assert len(llm_ids) == 2
             call_ids_by_run.append(llm_ids)
             parent = events[1].attributes["llm_call_id"]
-            for event in events[3:5]:
+            for event in (event for event in events if event.event_type.startswith("tool.")):
                 assert event.attributes["tool_call_id"] == "shared-raw-id"
                 assert event.attributes["parent_llm_call_id"] == parent
         assert call_ids_by_run[0].isdisjoint(call_ids_by_run[1])

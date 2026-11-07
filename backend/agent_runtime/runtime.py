@@ -22,11 +22,11 @@ from backend.agent_runtime.contracts import (
 from backend.agent_runtime.llm_port import LLMPort
 from backend.agent_runtime.deepseek_adapter import classify_llm_error
 from backend.agent_runtime.observability import (
-    LoggingObserver,
     ObservationEvent,
     ObservationValue,
     Observer,
     RunContext,
+    get_default_observer,
     safe_emit,
 )
 from backend.exceptions.external_exceptions import ExternalTimeoutError
@@ -64,7 +64,7 @@ class AgentRuntime:
         self._registry = registry
         self._dispatcher = dispatcher
         self._max_iterations = max_iterations
-        self._observer = observer if observer is not None else LoggingObserver()
+        self._observer = observer if observer is not None else get_default_observer()
         self._context_builder = (
             context_builder if context_builder is not None else ContextBuilder()
         )
@@ -92,7 +92,10 @@ class AgentRuntime:
                 async with budget:
                     for attempt in (1, 2):
                         try:
-                            response = await self._llm.complete(deepcopy(request))
+                            attempt_request = deepcopy(request)
+                            # 实际请求开始才计 Attempt/Retry；保留原有逻辑调用和失败事件语义。
+                            self._emit(run_id, "llm.attempt_started", **attributes, attempt=attempt)
+                            response = await self._llm.complete(attempt_request)
                             if loop.time() >= deadline:
                                 raise ExternalTimeoutError("外部服务调用超时")
                             break
