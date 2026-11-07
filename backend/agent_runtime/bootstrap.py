@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 from backend.agent_runtime.context_builder import ContextBudget, ContextBuilder
 from backend.agent_runtime.deepseek_adapter import DeepSeekAdapter, ErrorTranslator
 from backend.agent_runtime.llm_port import LLMPort
+from backend.agent_runtime.observability import Observer
 from backend.agent_runtime.runtime import AgentRuntime
 from backend.tools.bootstrap import build_tool_registry
 from backend.tools.infrastructure.dispatcher import ToolDispatcher
@@ -24,11 +25,13 @@ def build_agent_runtime(
     max_iterations: int = 5,
     context_builder: ContextBuilder | None = None,
     context_budget: ContextBudget | None = None,
+    observer: Observer | None = None,
 ) -> AgentRuntime:
     """默认接入已有 DeepSeek Client；测试可注入 LLMPort 或完整 Adapter 依赖。
 
     Client 归调用者所有，本函数与 Adapter 都不创建或关闭它。
     context_budget 配置默认构造器；注入 context_builder 时不可同时指定预算。
+    observer 默认使用结构化日志实现；可显式注入 NoOpObserver 关闭观测。
     """
     if context_builder is not None and context_budget is not None:
         raise ValueError("context_builder cannot be combined with context_budget")
@@ -65,4 +68,5 @@ def build_agent_runtime(
         dispatcher=ToolDispatcher(actual_registry),
         max_iterations=max_iterations,
         context_builder=actual_builder,
+        observer=observer,
     )
