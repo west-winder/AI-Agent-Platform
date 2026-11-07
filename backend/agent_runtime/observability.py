@@ -53,7 +53,10 @@ class ObservationEvent:
         for name, value in attributes.items():
             if name not in _ATTRIBUTE_NAMES:
                 raise ValueError("Unsupported observation attribute")
-            if type(value) not in (str, int, float, bool, type(None)):
+            if isinstance(value, str):
+                # 工具契约接受 str 子类；取内置字符串值，避免调用自定义 __str__。
+                attributes[name] = str.__str__(value)
+            elif type(value) not in (int, float, bool, type(None)):
                 raise TypeError("Observation attributes must be scalar metadata")
             if type(value) is float and not math.isfinite(value):
                 raise ValueError("Observation numbers must be finite")
@@ -72,8 +75,8 @@ class LoggingObserver:
 
     def emit(self, event: ObservationEvent) -> None:
         # 两个同步分支分别复用 B1 的安全边界，一路普通故障不阻止另一路。
-        _safely(lambda: self._write_log(event), event)
-        _safely(lambda: self._metrics.record(event), event)
+        _safely(lambda: self._write_log(event), run_id=event.run_id, event_type=event.event_type)
+        _safely(lambda: self._metrics.record(event), run_id=event.run_id, event_type=event.event_type)
 
     def snapshot(self) -> MetricsSnapshot:
         return self._metrics.snapshot()
@@ -96,10 +99,17 @@ class NoOpObserver:
 
 def safe_emit(observer: Observer, event: ObservationEvent) -> None:
     """隔离普通观测故障及备用日志故障；取消等 BaseException 继续传播。"""
-    _safely(lambda: observer.emit(event), event)
+    _safely(lambda: observer.emit(event), run_id=event.run_id, event_type=event.event_type)
 
 
-def _safely(action: Callable[[], None], event: ObservationEvent) -> None:
+def safe_emit_factory(
+    observer: Observer, event_factory: Callable[[], ObservationEvent], *, run_id: str, event_type: str,
+) -> None:
+    """构造与发送共同隔离；构造失败时仍可用关联字段输出安全诊断。"""
+    _safely(lambda: observer.emit(event_factory()), run_id=run_id, event_type=event_type)
+
+
+def _safely(action: Callable[[], None], *, run_id: str, event_type: str) -> None:
     try:
         action()
     except Exception as exc:
@@ -108,8 +118,8 @@ def _safely(action: Callable[[], None], event: ObservationEvent) -> None:
                 "agent_runtime.observer_failure",
                 extra={
                     "error_type": type(exc).__name__,
-                    "event_type": event.event_type,
-                    "run_id": event.run_id,
+                    "event_type": event_type,
+                    "run_id": run_id,
                 },
                 exc_info=False,
             )

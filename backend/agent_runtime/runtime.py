@@ -27,7 +27,7 @@ from backend.agent_runtime.observability import (
     Observer,
     RunContext,
     get_default_observer,
-    safe_emit,
+    safe_emit_factory,
 )
 from backend.exceptions.external_exceptions import ExternalTimeoutError
 from backend.tools.infrastructure.contracts import ToolContext, ToolErrorInfo, ToolFailure, ToolResult
@@ -70,9 +70,12 @@ class AgentRuntime:
         )
 
     def _emit(self, run_id: str, event_type: str, **attributes: ObservationValue) -> None:
-        safe_emit(self._observer, ObservationEvent(
-            run_id, event_type, datetime.now(UTC), attributes,
-        ))
+        # 事件校验/时间戳失败也属于观测故障，不能先于安全发送逃逸到业务路径。
+        safe_emit_factory(
+            self._observer,
+            lambda: ObservationEvent(run_id, event_type, datetime.now(UTC), attributes),
+            run_id=run_id, event_type=event_type,
+        )
 
     async def _complete(
         self, request: LLMRequest, iteration: int, *, run_id: str, llm_call_id: str,
