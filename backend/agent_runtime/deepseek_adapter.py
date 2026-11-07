@@ -34,6 +34,14 @@ logger = logging.getLogger(__name__)
 ErrorTranslator = Callable[[TimeoutError | APIError], ExternalServiceError]
 
 
+def _log(level: int, message: str, extra: dict[str, Any]) -> None:
+    """仅隔离诊断写入；不包围 SDK、响应转换或异常转换，不吞取消等 BaseException。"""
+    try:
+        logger.log(level, message, extra=extra)
+    except Exception:
+        pass
+
+
 @dataclass(frozen=True)
 class LLMRetryDecision:
     """Agent 边界的分类结果；None 表示不授权 Runtime 重试。"""
@@ -180,13 +188,13 @@ class DeepSeekAdapter:
             async with asyncio.timeout(self._overall_timeout_seconds):
                 sdk_response = await self._client.chat.completions.create(**payload)
         except (TimeoutError, APIError) as exc:
-            logger.warning("agent_llm.external_error", extra={"error_type": type(exc).__name__})
+            _log(logging.WARNING, "agent_llm.external_error", {"error_type": type(exc).__name__})
             raise self._translate_error(exc) from exc
 
         response = self._convert_response(sdk_response)
-        logger.info(
-            "agent_llm.response",
-            extra={"finish_reason": response.finish_reason, "tool_count": len(response.tool_calls)},
+        _log(
+            logging.INFO, "agent_llm.response",
+            {"finish_reason": response.finish_reason, "tool_count": len(response.tool_calls)},
         )
         return response
 
