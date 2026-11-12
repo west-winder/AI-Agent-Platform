@@ -4,7 +4,9 @@
 
 已完成的版本里程碑：
 
-**v0.3 — PostgreSQL Runtime Baseline + Backend / LLM I/O Foundation**
+**v0.5 — Tool Calling & Agent Runtime Foundation**
+
+Stage 0～3 已 **COMPLETE / FROZEN**；下一阶段为 **Stage 4 — LangGraph + Agent Workflow（NEXT）**。
 
 ---
 
@@ -45,7 +47,7 @@ Deployment
 ## Current Stage
 
 ```text
-当前 main 分支开发进度（历史版本里程碑：v0.3）
+当前 main 分支阶段里程碑：v0.5
 
 Stage 0 — Memory + PostgreSQL
 COMPLETE / FROZEN
@@ -57,13 +59,16 @@ Stage 2 — Unified RAG
 COMPLETE / FROZEN
 
 Stage 3 — Tool Calling + Minimal Agent Loop
-IN PROGRESS
+COMPLETE / FROZEN
 
-Module 1–4 — COMPLETE
+Module 1–4 — COMPLETE / FROZEN
 Module 5 — State / Context — COMPLETE / FROZEN
-Module 6 — Error Handling / Retry / Limits — COMPLETE (V1)
+Module 6 — Error Handling / Retry / Limits — COMPLETE / FROZEN（V1）
 Module 7 — MCP Host Integration — COMPLETE / FROZEN
 Module 8 — Evaluation / Observability / Metrics — COMPLETE / FROZEN
+
+Stage 4 — LangGraph + Agent Workflow
+NEXT
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -114,6 +119,10 @@ Module 8 — Evaluation / Observability / Metrics — COMPLETE / FROZEN
 
 ## 当前架构
 
+Python + FastAPI 后端与 Gradio 前端保留现有聊天链路；Unified RAG 和自研 Agent Runtime
+已分别实现，尚未完成 RAG Tool 及旧 ChatService 到 AgentRuntime 的集成。
+以下为现有聊天与 Memory 链路：
+
 ```text
 Gradio Frontend
         |
@@ -140,7 +149,7 @@ SQLAlchemy ORM           Memory Read / Write
         DeepSeek OpenAI-compatible API
 ```
 
-LLM Service 是所有外部 LLM 调用的唯一出口，统一提供：
+现有聊天、Memory 与 RAG 的 LLM 调用通过 LLM Service，统一提供：
 
 ```text
 Async
@@ -150,6 +159,31 @@ Timeout
 Retry
 Error Handling
 ```
+
+Agent Runtime 使用统一 `LLMPort` / `DeepSeekAdapter` 接口，默认复用 LLM Service 的
+Client 和配置，通过独立 Adapter 发起 Function Calling：
+
+```text
+FastAPI lifespan → MCP Host Bootstrap → app.state.agent_runtime
+                         |                       |
+                  MCP Client / Session       AgentRuntime
+                         |                       |
+                  stdio MCP Server     History → ContextBuilder → LLMPort
+                                                 |                 |
+                                          Tool Message ← Dispatcher ← Tool Call
+                                                             |
+                                                   ToolRegistry / Schema
+                                                             |
+                                              Local Handler / MCP Tool Adapter
+
+观测旁路：Runtime Events → Observer → JSON Logs + Process-local Metrics
+离线评测：Evaluation V1 Runner → ExecutionEvidence → EvaluationEngine
+```
+
+Runtime 保留 Run-local State / History，按上下文预算构造 Model Context，提供最大迭代限制、
+有限 LLM 重试及逻辑调用超时预算。工具统一使用 Tool Contract / Schema 和 Registry / Dispatcher。
+MCP Host 管理 Client / Session 生命周期；仓库包含独立 Web Page Fetch MCP Server，
+平台自身不对外提供 MCP Server。现有 `/chat`、`/chat/stream` 仍使用原聊天链路。
 
 Memory System 内部进一步拆分为：
 
@@ -439,7 +473,8 @@ API Key 使用环境变量管理。
 
 v0.3 完成 Backend + LLM I/O Foundation。
 
-所有能力集中在 `llm_service.py` 单一出口：
+现有聊天、Memory 与 RAG 的 LLM I/O 能力集中在 `llm_service.py`；Stage 3 的
+Function Calling 通过独立 `DeepSeekAdapter` 复用其 Client 与配置：
 
 ```text
 call_llm            → 一次性 Chat Completion
@@ -1395,6 +1430,12 @@ manual_historical_retrieval_v1.py
 
 ## Validation Documentation
 
+Stage 3 文档入口：
+
+- [Stage 3 状态与冻结边界](docs/stage3_status.md)
+- [Stage 3 核心专业知识复习手册](docs/stage3_knowledge_review.md)
+- [Module 8 冻结后加固验收](docs/testing/module8_post_freeze_hardening.md)
+
 重要验证过程记录在：
 
 ```text
@@ -1593,8 +1634,7 @@ http://127.0.0.1:7860
 - Query Rewrite（查询改写）/ ANN（近似最近邻检索）/ Multi-hop Retrieval（多跳检索）
 - Hybrid Retrieval 单路异常自动降级
 - 完整自动化 Faithfulness Evaluation（回答忠实度评估）
-- Tool Calling
-- Agent Loop
+- 旧 ChatService / 聊天路由到 AgentRuntime 的完整迁移
 - LangGraph Workflow
 - Multi-Agent Collaboration
 - Docker Deployment
@@ -1689,16 +1729,16 @@ Question Presupposition
 
 ### Stage 3 — Tool Calling + Minimal Agent Loop
 
-**IN PROGRESS**
+**COMPLETE / FROZEN**
 
 | Module | 内容 | 状态 |
 | --- | --- | --- |
-| 1 | Tool Contract / Schema | COMPLETE |
-| 2 | Function Calling | COMPLETE |
-| 3 | Registry / Dispatcher | COMPLETE |
-| 4 | Minimal Agent Loop | COMPLETE |
-| 5 | State / Context | COMPLETE / FROZEN |
-| 6 | Error Handling / Retry / Limits | COMPLETE (V1) |
+| 1 | Tool Contract / Schema | COMPLETE / FROZEN |
+| 2 | Function Calling | COMPLETE / FROZEN |
+| 3 | Tool Registry / Dispatcher | COMPLETE / FROZEN |
+| 4 | Minimal Agent Loop | COMPLETE / FROZEN |
+| 5 | State / ContextBuilder | COMPLETE / FROZEN |
+| 6 | Error Handling / Retry / Limits | COMPLETE / FROZEN（V1） |
 | 7 | MCP Host Integration | COMPLETE / FROZEN |
 | 8 | Agent Evaluation + Basic Observability + Metrics | COMPLETE / FROZEN |
 
@@ -1744,7 +1784,7 @@ Module 7 MCP Host Integration 已 **COMPLETE / FROZEN**：
 [架构](docs/mcp_host_integration/ARCHITECTURE.md)、[代码导读](docs/mcp_host_integration/READING_GUIDE.md)、
 [最终验收报告](docs/testing/module7_mcp_host_final_acceptance.md)记录接口、证据和冻结边界。
 
-首版使用 stdio 和静态 MCP Server 配置；不支持动态管理、自动重连或热更新，平台暂不提供 MCP Server 能力。Runtime 注入 app.state.agent_runtime，旧 `/chat`、`/chat/stream` 未切换到 AgentRuntime。Module 8 已完成，Stage 3 仍为 IN PROGRESS，等待单独的阶段复盘与最终确认。历史全仓测试问题保留在验证报告中，不混入本次专项验收结论。
+首版使用 stdio 和静态 MCP Server 配置；不支持动态管理、自动重连或热更新，平台暂不提供 MCP Server 能力。Runtime 注入 app.state.agent_runtime，旧 `/chat`、`/chat/stream` 未切换到 AgentRuntime。Module 1～8 及 Stage 3 整体已 COMPLETE / FROZEN。历史全仓测试问题保留在验证报告中，不混入本次专项验收结论。
 
 Module 8 Evaluation / Observability / Metrics 已 **COMPLETE / FROZEN**：
 
@@ -1759,18 +1799,26 @@ Module 8 Evaluation / Observability / Metrics 已 **COMPLETE / FROZEN**：
 [Module 8 最终验收](docs/testing/module8_final_acceptance.md)和
 [Stage 3 状态记录](docs/stage3_status.md)记录统计口径、验收结果和冻结边界。
 
+最近一次既有加固验收覆盖 Runtime、MCP Host、Evaluation 和 Tools：
+**1032 passed，0 failures/errors/skipped**，见
+[Module 8 冻结后加固记录](docs/testing/module8_post_freeze_hardening.md)。
+这是已有验收结果；本轮文档收尾没有重新运行测试，不与历史批次累加。
+
 计划通过 Tool Contract（工具契约）将 RAG 接入 Agent Runtime（智能体运行时），尚未实现。
 
 ---
 
-### Stage 4 — LangGraph + Workflow
+### Stage 4 — LangGraph + Agent Workflow
 
-进一步学习和实现：
+**NEXT**，尚未完成开发。计划学习和实现：
 
-- LangGraph
-- Workflow State
-- Multi-step Agent
-- Multi-Agent Collaboration
+- LangGraph 基础
+- StateGraph / Node / Edge
+- Conditional Routing
+- Workflow 编排
+- Checkpoint / 持久化
+- Interrupt / Human-in-the-loop
+- 复杂分支与多步骤任务处理
 
 ---
 
@@ -1807,25 +1855,23 @@ Module 8 已完成 Offline Evaluation V1、Runtime Logging / Tracing 和 Process
 
 ## Version
 
-已完成的历史版本里程碑：
+当前阶段版本：
 
 ```text
-v0.3
+v0.5
 ```
 
 Core Milestone:
 
 ```text
-PostgreSQL Runtime Baseline
-+
-Stage 1 — Backend + LLM I/O Foundation
+Tool Calling & Agent Runtime Foundation
+Stage 3 — Tool Calling + Minimal Agent Loop
+COMPLETE / FROZEN
 ```
 
-当前 main 分支的 Stage 2 Unified RAG 已完成并正式冻结，Phase 7 Finalization 已完成；
-Stage 3 仍为 IN PROGRESS，Module 5 State / Context 已 COMPLETE / FROZEN，
-Module 6 Error Handling / Retry / Limits 已 COMPLETE (V1)，Module 7 MCP Host Integration 已 COMPLETE / FROZEN，
-Module 8 Evaluation / Observability / Metrics 已 COMPLETE / FROZEN；Stage 3 整体复盘与最终确认尚未执行。
-上述开发进度不代表已发布新的正式版本。
+Stage 0～3 及 Stage 3 Module 1～8 均已 COMPLETE / FROZEN。
+历史版本 v0.3 完成 PostgreSQL 与 LLM I/O Foundation，v0.4 完成 Unified RAG Foundation。
+下一阶段为 Stage 4 — LangGraph + Agent Workflow（NEXT），本轮不启动其开发。
 
 ---
 
