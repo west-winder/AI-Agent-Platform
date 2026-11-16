@@ -1,0 +1,3 @@
+# 仅用于本实验；不修改仓库根目录 requirements.txt。
+langgraph==1.2.22
+pytest==9.2.0

@@ -1,0 +1,61 @@
+Python 3.12.9 | langgraph 1.2.22 | pytest 9.2.0
+{"node": "DispatchTasks", "task_count": 6}
+{"node": "AnalyzeContent", "chapter_id": "ch01", "content": "Chapter 1: local text. [ref:valid]", "input_keys": ["chapter_id", "content"], "step": 3}
+{"node": "CheckReferences", "chapter_id": "ch01", "content": "Chapter 1: local text. [ref:valid]", "input_keys": ["chapter_id", "content"], "step": 3, "subgraph_input": {"chapter_id": "ch01", "content": "Chapter 1: local text. [ref:valid]"}, "subgraph_trace": ["ExtractReferences", "ValidateReferences", "GenerateReferenceResult"]}
+{"node": "AnalyzeContent", "chapter_id": "ch02", "content": "Chapter 2: local text. [ref:missing]", "input_keys": ["chapter_id", "content"], "step": 3}
+{"node": "CheckReferences", "chapter_id": "ch02", "content": "Chapter 2: local text. [ref:missing]", "input_keys": ["chapter_id", "content"], "step": 3, "subgraph_input": {"chapter_id": "ch02", "content": "Chapter 2: local text. [ref:missing]"}, "subgraph_trace": ["ExtractReferences", "ValidateReferences", "GenerateReferenceResult"]}
+{"node": "AnalyzeContent", "chapter_id": "ch03", "content": "Chapter 3: local text. [ref:valid]", "input_keys": ["chapter_id", "content"], "step": 3}
+{"node": "CheckReferences", "chapter_id": "ch03", "content": "Chapter 3: local text. [ref:valid]", "input_keys": ["chapter_id", "content"], "step": 3, "subgraph_input": {"chapter_id": "ch03", "content": "Chapter 3: local text. [ref:valid]"}, "subgraph_trace": ["ExtractReferences", "ValidateReferences", "GenerateReferenceResult"]}
+{"node": "GenerateReport", "content_count": 3, "reference_count": 3, "step": 4}
+REPORT
+[
+  {
+    "chapter_id": "ch01",
+    "content_analysis": {
+      "chapter_id": "ch01",
+      "status": "ok",
+      "result": "characters=34"
+    },
+    "reference_check": {
+      "chapter_id": "ch01",
+      "status": "ok",
+      "result": "extracted=1",
+      "failure_reason": null
+    }
+  },
+  {
+    "chapter_id": "ch02",
+    "content_analysis": {
+      "chapter_id": "ch02",
+      "status": "ok",
+      "result": "characters=36"
+    },
+    "reference_check": {
+      "chapter_id": "ch02",
+      "status": "failed",
+      "result": "extracted=1",
+      "failure_reason": "模拟引用不存在：missing"
+    }
+  },
+  {
+    "chapter_id": "ch03",
+    "content_analysis": {
+      "chapter_id": "ch03",
+      "status": "ok",
+      "result": "characters=34"
+    },
+    "reference_check": {
+      "chapter_id": "ch03",
+      "status": "ok",
+      "result": "extracted=1",
+      "failure_reason": null
+    }
+  }
+]
+SUPERSTEP
+step=1 A
+step=2 C:blocked
+step=2 B:return
+step=None observer:B update received; C blocked; D not started
+step=2 C:return
+step=3 D:start (sees B,C)
