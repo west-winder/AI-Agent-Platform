@@ -1,0 +1,38 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langchain_m4_foundations\.venv\Scripts\python.exe
+rootdir: F:\AI_Agent_Platform\experiments\langchain_m4_foundations
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 26 items
+
+tests/offline/test_e1_prompt_model_parser.py::test_prompt_variables_and_message_types PASSED [  3%]
+tests/offline/test_e1_prompt_model_parser.py::test_prompt_missing_variable PASSED [  7%]
+tests/offline/test_e1_prompt_model_parser.py::test_chain_extracts_string_from_model_message PASSED [ 11%]
+tests/offline/test_e2_runnable_lcel.py::test_runnable_sequence_passes_intermediate_data[  Prompt   Model Parser  -words0-summary0] PASSED [ 15%]
+tests/offline/test_e2_runnable_lcel.py::test_runnable_sequence_passes_intermediate_data[  -words1-summary1] PASSED [ 19%]
+tests/offline/test_e3_async_streaming.py::test_ainvoke_returns_complete_message PASSED [ 23%]
+tests/offline/test_e3_async_streaming.py::test_stream_yields_ordered_chunks PASSED [ 26%]
+tests/offline/test_e3_async_streaming.py::test_astream_yields_ordered_chunks_that_can_be_merged PASSED [ 30%]
+tests/offline/test_e3_async_streaming.py::test_offline_guard_rejects_external_connections PASSED [ 34%]
+tests/offline/test_e4_tool_calling.py::test_weather_metadata_schema_and_standalone_execution PASSED [ 38%]
+tests/offline/test_e4_tool_calling.py::test_bind_tools_sends_definition_and_parses_call_without_execution PASSED [ 42%]
+tests/offline/test_e5_tool_node.py::test_single_call_has_result_and_matching_id PASSED [ 46%]
+tests/offline/test_e5_tool_node.py::test_multiple_calls_match_results_by_id PASSED [ 50%]
+tests/offline/test_e5_tool_node.py::test_missing_parameter_returns_error_tool_message PASSED [ 53%]
+tests/offline/test_e5_tool_node.py::test_tool_execution_exception_propagates_by_default PASSED [ 57%]
+tests/offline/test_e5_tool_node.py::test_configured_error_handler_turns_exception_into_message PASSED [ 61%]
+tests/offline/test_e6_structured_output.py::test_pydantic_schema_and_local_validation PASSED [ 65%]
+tests/offline/test_e6_structured_output.py::test_json_mode_returns_raw_and_parsed_on_success PASSED [ 69%]
+tests/offline/test_e6_structured_output.py::test_json_mode_returns_raw_and_error_when_parsing_fails[valid-json-invalid-schema] PASSED [ 73%]
+tests/offline/test_e6_structured_output.py::test_json_mode_returns_raw_and_error_when_parsing_fails[malformed-json] PASSED [ 76%]
+tests/offline/test_e6_structured_output.py::test_adapter_sends_tool_schema_for_function_mode_and_json_schema_alias[function_calling] PASSED [ 80%]
+tests/offline/test_e6_structured_output.py::test_adapter_sends_tool_schema_for_function_mode_and_json_schema_alias[json_schema] PASSED [ 84%]
+tests/test_deepseek_smoke.py::test_e1_live_text SKIPPED (DeepSeek sm...) [ 88%]
+tests/test_deepseek_smoke.py::test_e3_live_astream SKIPPED (DeepSeek...) [ 92%]
+tests/test_deepseek_smoke.py::test_e4_live_tool_call SKIPPED (DeepSe...) [ 96%]
+tests/test_deepseek_smoke.py::test_e6_live_json_mode SKIPPED (DeepSe...) [100%]
+
+=========================== short test summary info ===========================
+SKIPPED [4] tests\conftest.py:17: DeepSeek smoke requires --deepseek-smoke
+======================== 22 passed, 4 skipped in 1.43s ========================

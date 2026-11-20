@@ -1,0 +1,46 @@
+.venv/Scripts/python.exe -X utf8 -B e1_prompt_model_parser.py
+dict -> ChatPromptValue
+SystemMessage You teach software engineering. Answer in English.
+HumanMessage Explain LCEL in one short sentence.
+AIMessage -> TextAccessor 'LCEL connects runnable components.'
+isinstance(result, str) = True
+
+.venv/Scripts/python.exe -X utf8 -B e2_runnable_lcel.py
+str -> list[str] ['Prompt', 'Model', 'Parser']
+RunnableSequence -> dict {'count': 3, 'joined': 'Prompt/Model/Parser'}
+
+.venv/Scripts/python.exe -X utf8 -B e3_async_streaming.py
+ainvoke AIMessage 'Compose and run.'
+stream [('AIMessageChunk', 'C'), ('AIMessageChunk', 'o'), ('AIMessageChunk', 'm'), ('AIMessageChunk', 'p'), ('AIMessageChunk', 'o'), ('AIMessageChunk', 's'), ('AIMessageChunk', 'e'), ('AIMessageChunk', ' '), ('AIMessageChunk', 'a'), ('AIMessageChunk', 'n'), ('AIMessageChunk', 'd'), ('AIMessageChunk', ' '), ('AIMessageChunk', 'r'), ('AIMessageChunk', 'u'), ('AIMessageChunk', 'n'), ('AIMessageChunk', '.')]
+combined 'Compose and run.'
+astream [('AIMessageChunk', 'C'), ('AIMessageChunk', 'o'), ('AIMessageChunk', 'm'), ('AIMessageChunk', 'p'), ('AIMessageChunk', 'o'), ('AIMessageChunk', 's'), ('AIMessageChunk', 'e'), ('AIMessageChunk', ' '), ('AIMessageChunk', 'a'), ('AIMessageChunk', 'n'), ('AIMessageChunk', 'd'), ('AIMessageChunk', ' '), ('AIMessageChunk', 'r'), ('AIMessageChunk', 'u'), ('AIMessageChunk', 'n'), ('AIMessageChunk', '.')]
+combined 'Compose and run.'
+
+.venv/Scripts/python.exe -X utf8 -B e4_tool_calling.py
+get_weather Look up simulated weather for a city by its exact name.
+{'description': 'Look up simulated weather for a city by its exact name.', 'properties': {'city': {'title': 'City', 'type': 'string'}}, 'required': ['city'], 'title': 'get_weather', 'type': 'object'}
+独立工具执行 sunny
+发给模型的工具定义 [{'type': 'function', 'function': {'name': 'get_weather', 'description': 'Look up simulated weather for a city by its exact name.', 'parameters': {'properties': {'city': {'type': 'string'}}, 'required': ['city'], 'type': 'object'}}}]
+模型提出的调用 [{'name': 'get_weather', 'args': {'city': 'Beijing'}, 'id': 'weather-1', 'type': 'tool_call'}]
+
+.venv/Scripts/python.exe -X utf8 -B e5_tool_node.py
+ToolMessage beijing success sunny
+ToolMessage shanghai success cloudy
+ToolMessage unknown-city error Error: ValueError('No simulated weather for Unknown')
+ Please fix your mistakes.
+ToolMessage missing-argument error Error invoking tool 'get_weather' with kwargs {} with error:
+ city: Field required
+ Please fix the error and try again.
+
+.venv/Scripts/python.exe -X utf8 -B e6_structured_output.py
+Schema {'properties': {'paper_title': {'title': 'Paper Title', 'type': 'string'}, 'needs_review': {'title': 'Needs Review', 'type': 'boolean'}, 'reason': {'title': 'Reason', 'type': 'string'}}, 'required': ['paper_title', 'needs_review', 'reason'], 'title': 'PaperDecision', 'type': 'object'}
+本地校验 A Study of Graphs True The abstract omits the evaluation method.
+本地错误 [{'type': 'bool_type', 'loc': ('needs_review',), 'msg': 'Input should be a valid boolean', 'url': 'https://errors.pydantic.dev/2.14/v/bool_type'}]
+response_format {'type': 'json_object'}
+raw AIMessage {"paper_title": "A Study of Graphs", "needs_review": true, "reason": "The abstract omits the evaluation method."}
+parsed paper_title='A Study of Graphs' needs_review=True reason='The abstract omits the evaluation method.'
+parsing_error NoneType
+response_format {'type': 'json_object'}
+raw AIMessage {"paper_title": "A Study of Graphs", "needs_review": "yes", "reason": "The abstract omits the evaluation method."}
+parsed None
+parsing_error OutputParserException

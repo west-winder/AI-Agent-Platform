@@ -1,0 +1,18 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langchain_m4_foundations\.venv\Scripts\python.exe
+rootdir: F:\AI_Agent_Platform\experiments\langchain_m4_foundations
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 26 items / 22 deselected / 4 selected
+
+tests/test_deepseek_smoke.py::test_e1_live_text E1 text_type=TextAccessor characters=152
+PASSED
+tests/test_deepseek_smoke.py::test_e3_live_astream E3 chunks=9 merged_text=yes
+PASSED
+tests/test_deepseek_smoke.py::test_e4_live_tool_call E4 tool_call=get_weather args_match=yes id_present=yes
+PASSED
+tests/test_deepseek_smoke.py::test_e6_live_json_mode E6 method=json_mode raw=AIMessage parsed=PaperDecision parsing_error=None
+PASSED
+
+====================== 4 passed, 22 deselected in 6.18s =======================
