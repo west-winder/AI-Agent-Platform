@@ -1,0 +1,14 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_rag_integration\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_rag_integration
+configfile: pytest.ini
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 4 items
+
+experiments\langgraph_m4_rag_integration\tests\test_rag_graph.py::test_retrieve_inputs_field_mapping_order_and_model_context PASSED [ 25%]
+experiments\langgraph_m4_rag_integration\tests\test_rag_graph.py::test_empty_retrieval_retains_empty_list_and_skips_model PASSED [ 50%]
+experiments\langgraph_m4_rag_integration\tests\test_rag_graph.py::test_retrieval_exception_propagates_without_calling_model PASSED [ 75%]
+experiments\langgraph_m4_rag_integration\tests\test_rag_graph.py::test_independent_invocations_use_only_current_retrieval PASSED [100%]
+
+============================== 4 passed in 0.45s ==============================

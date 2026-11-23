@@ -1,0 +1,10 @@
+A 正常检索
+  query: How long are daily backups retained?
+  retrieved_docs: [{'chunk_id': 'retention-1', 'document_id': 'backup-policy', 'content': 'Daily backups are retained for 30 days.', 'source': 'backup-policy.md', 'rank': 1}]
+  answer: Daily backups are retained for 30 days.
+B 空检索
+  query: What is the weekend support number?
+  retrieved_docs: []
+  answer: 知识库未检索到与问题相关的内容。
+C 检索失败
+  向调用方传播 RuntimeError: 模拟检索故障
