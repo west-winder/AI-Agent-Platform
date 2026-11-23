@@ -1,0 +1,19 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_memory_integration\.venv\Scripts\python.exe
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_memory_integration
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 9 items
+
+tests/test_memory_graph.py::test_relevant_memory_enters_answer_prompt_only PASSED [ 11%]
+tests/test_memory_graph.py::test_long_term_preference_writes_once_and_is_available_to_owner PASSED [ 22%]
+tests/test_memory_graph.py::test_small_talk_does_not_save_assistant_generated_fact PASSED [ 33%]
+tests/test_memory_graph.py::test_write_failure_reaches_caller_without_saving PASSED [ 44%]
+tests/test_memory_graph.py::test_same_compiled_graph_keeps_user_context_and_state_separate PASSED [ 55%]
+tests/test_memory_graph.py::test_invalid_save_candidate_never_calls_writer[None-nonblank] PASSED [ 66%]
+tests/test_memory_graph.py::test_invalid_save_candidate_never_calls_writer[  -nonblank] PASSED [ 77%]
+tests/test_memory_graph.py::test_invalid_save_candidate_never_calls_writer[I prefer Rust.-verbatim excerpt] PASSED [ 88%]
+tests/test_memory_graph.py::test_structured_output_rejects_non_boolean_decision PASSED [100%]
+
+============================== 9 passed in 0.77s ==============================

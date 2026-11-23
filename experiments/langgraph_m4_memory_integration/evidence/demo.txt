@@ -1,0 +1,18 @@
+
+user_id=1 query=I always prefer short Python examples.
+  memory_context: 'I use Python for notebooks.'
+  answer: Got it.
+  decision: {'should_save': True, 'content': 'I always prefer short Python examples.'}
+  memory_saved: True
+
+user_id=2 query=Show me Python.
+  memory_context: 'I use Python for web apps.'
+  answer: Let's use a web app example.
+  decision: {'should_save': False, 'content': None}
+  memory_saved: False
+
+user_id=1 query=Show me Python.
+  memory_context: 'I use Python for notebooks.\nI always prefer short Python examples.'
+  answer: Here is a short notebook example.
+  decision: {'should_save': False, 'content': None}
+  memory_saved: False
