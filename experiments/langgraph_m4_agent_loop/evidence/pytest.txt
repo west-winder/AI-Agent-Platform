@@ -1,0 +1,18 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_agent_loop\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_agent_loop
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 7 items
+
+tests/test_agent_loop.py::test_tool_result_returns_to_model_with_same_call_id PASSED [ 14%]
+tests/test_agent_loop.py::test_tool_value_error_is_visible_to_model_and_final_answer PASSED [ 28%]
+tests/test_agent_loop.py::test_at_llm_limit_records_every_pending_call_without_executing_it PASSED [ 42%]
+tests/test_agent_loop.py::test_third_llm_call_can_finish_with_an_answer PASSED [ 57%]
+tests/test_agent_loop.py::test_independent_invokes_isolate_state_while_sharing_model PASSED [ 71%]
+tests/test_agent_loop.py::test_finish_does_not_summarize_input_history_tool_results PASSED [ 85%]
+tests/test_agent_loop.py::test_graph_configures_recursion_limit_as_a_separate_guard PASSED [100%]
+
+============================== 7 passed in 0.19s ==============================

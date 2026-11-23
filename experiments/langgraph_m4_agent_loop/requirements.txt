@@ -1,0 +1,6 @@
+langchain-core==1.8.1
+langgraph==1.2.22
+langgraph-prebuilt==1.1.2
+langsmith==0.15.0
+pydantic==2.14.3
+pytest==9.2.0

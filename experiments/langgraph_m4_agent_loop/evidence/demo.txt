@@ -1,0 +1,28 @@
+
+正常完成 | llm_calls=2 | stop_reason=answered
+  AIMessage tool_calls: ['beijing']
+  ToolMessage beijing (success): sunny
+The simulated weather in Beijing is sunny.
+成功结果 [beijing] sunny
+
+工具执行失败 | llm_calls=2 | stop_reason=answered
+  AIMessage tool_calls: ['unknown']
+  ToolMessage unknown (error): Error: ValueError('No simulated weather for Unknown')
+ Please fix your mistakes.
+The lookup failed. I cannot report the weather.
+工具失败 [unknown] Error: ValueError('No simulated weather for Unknown')
+ Please fix your mistakes.
+
+达到模型调用上限 | llm_calls=3 | stop_reason=llm_limit
+  AIMessage tool_calls: ['beijing']
+  ToolMessage beijing (success): sunny
+  AIMessage tool_calls: ['unknown']
+  ToolMessage unknown (error): Error: ValueError('No simulated weather for Unknown')
+ Please fix your mistakes.
+  AIMessage tool_calls: ['shanghai']
+  ToolMessage shanghai (error): 因预算限制未执行
+任务未完成，已达到 3 次模型调用上限。
+成功结果 [beijing] sunny
+工具失败 [unknown] Error: ValueError('No simulated weather for Unknown')
+ Please fix your mistakes.
+未完成 [shanghai] 因预算限制未执行

@@ -1,0 +1,5 @@
+Python 3.12.9
+pip 24.3.1 from F:\AI_Agent_Platform\experiments\langgraph_m4_agent_loop\.venv\Lib\site-packages\pip (python 3.12)
+
+No broken requirements found.
+pip freeze matches all 43 locked versions.
