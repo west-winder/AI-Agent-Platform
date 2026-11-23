@@ -1,0 +1,23 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m3\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m3
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.14.17
+collecting ... collected 12 items
+
+tests/test_runtime.py::test_send_tasks_isolation_reducers_and_report[1] PASSED [  8%]
+tests/test_runtime.py::test_send_tasks_isolation_reducers_and_report[3] PASSED [ 16%]
+tests/test_runtime.py::test_send_tasks_isolation_reducers_and_report[5] PASSED [ 25%]
+tests/test_runtime.py::test_subgraph_nodes_and_wrapper_conversion PASSED [ 33%]
+tests/test_runtime.py::test_business_failure_preserves_content_result PASSED [ 41%]
+tests/test_runtime.py::test_independent_invokes_on_same_compiled_graph PASSED [ 50%]
+tests/test_runtime.py::test_empty_paper_generates_one_empty_report PASSED [ 58%]
+tests/test_runtime.py::test_invalid_chapter_ids[ids0] PASSED             [ 66%]
+tests/test_runtime.py::test_invalid_chapter_ids[ids1] PASSED             [ 75%]
+tests/test_runtime.py::test_send_workers_really_overlap PASSED           [ 83%]
+tests/test_runtime.py::test_superstep_order PASSED                       [ 91%]
+tests/test_runtime.py::test_report_waits_for_blocked_reference_wrapper PASSED [100%]
+
+============================= 12 passed in 1.65s ==============================

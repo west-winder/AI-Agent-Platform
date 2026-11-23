@@ -1,0 +1,24 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_llm_node\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_llm_node
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 11 items
+
+tests/test_basic_qa.py::test_basic_qa_compiles_without_calling_model_and_merges_answer PASSED [  9%]
+tests/test_basic_qa.py::test_basic_qa_node_only_returns_the_answer PASSED [ 18%]
+tests/test_basic_qa.py::test_basic_qa_uses_the_model_injected_into_each_graph PASSED [ 27%]
+tests/test_basic_qa.py::test_basic_qa_requires_plain_text_content PASSED [ 36%]
+tests/test_basic_qa.py::test_model_error_propagates_without_retry[build_basic_qa_graph-state0] PASSED [ 45%]
+tests/test_basic_qa.py::test_model_error_propagates_without_retry[build_messages_graph-state1] PASSED [ 54%]
+tests/test_deepseek_smoke.py::test_deepseek_messages_smoke SKIPPED (...) [ 63%]
+tests/test_messages.py::test_messages_appends_reply_and_preserves_full_message PASSED [ 72%]
+tests/test_messages.py::test_messages_reducer_replaces_existing_message_with_same_id PASSED [ 81%]
+tests/test_messages.py::test_independent_invokes_have_fresh_state_but_share_model PASSED [ 90%]
+tests/test_network_guard.py::test_offline_guard_rejects_external_connections_and_dns PASSED [100%]
+
+=========================== short test summary info ===========================
+SKIPPED [1] tests\conftest.py:22: DeepSeek smoke requires --deepseek-smoke
+======================== 10 passed, 1 skipped in 2.16s ========================

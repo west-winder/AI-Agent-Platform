@@ -1,0 +1,12 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_llm_node\.venv\Scripts\python.exe
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_llm_node
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 11 items / 10 deselected / 1 selected
+
+tests/test_deepseek_smoke.py::test_deepseek_messages_smoke DeepSeek messages=HumanMessage,AIMessage reply_characters=6
+PASSED
+
+====================== 1 passed, 10 deselected in 2.07s =======================

@@ -1,0 +1,14 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_llm_node\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_llm_node
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0
+collecting ... collected 11 items / 10 deselected / 1 selected
+
+tests/test_deepseek_smoke.py::test_deepseek_messages_smoke SKIPPED (...) [100%]
+
+=========================== short test summary info ===========================
+SKIPPED [1] tests\test_deepseek_smoke.py:14: DEEPSEEK_API_KEY is missing
+====================== 1 skipped, 10 deselected in 1.45s ======================

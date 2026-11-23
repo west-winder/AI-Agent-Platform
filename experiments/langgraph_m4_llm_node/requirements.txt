@@ -1,0 +1,6 @@
+langchain-core==1.8.1
+langchain-deepseek==1.2.0
+langgraph==1.2.22
+langsmith==0.15.0
+python-dotenv==1.2.3
+pytest==9.2.0

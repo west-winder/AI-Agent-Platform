@@ -1,0 +1,6 @@
+E1 Basic QA
+  question (str): What does a node receive?
+  answer   (str): A node receives state.
+E2 MessagesState
+  HumanMessage: What does a reducer do?
+  AIMessage: A reducer merges updates into state.
