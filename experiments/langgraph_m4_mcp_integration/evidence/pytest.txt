@@ -1,0 +1,20 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_mcp_integration\.venv\Scripts\python.exe
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_mcp_integration
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.15.0, platformdirs-4.14.8
+collecting ... collected 4 items
+
+tests/test_integration.py::test_production_stdio_negotiates_and_exposes_tool_schema PASSED [ 25%]
+tests/test_integration.py::test_fixture_tool_roundtrip_preserves_structured_content_and_call_id PASSED [ 50%]
+tests/test_integration.py::test_server_is_error_reaches_model_as_failed_tool_message PASSED [ 75%]
+tests/test_integration.py::test_stdio_disconnect_during_tool_call_propagates_to_graph_caller PASSED [100%]
+
+============================== warnings summary ===============================
+stdio_adapter.py:6
+  F:\AI_Agent_Platform\experiments\langgraph_m4_mcp_integration\stdio_adapter.py:6: LangChainBetaWarning: `langchain.mcp` is in beta. It is actively being worked on, so the API may change.
+    from langchain.mcp import MCPAdapter
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 4 passed, 1 warning in 6.20s =========================

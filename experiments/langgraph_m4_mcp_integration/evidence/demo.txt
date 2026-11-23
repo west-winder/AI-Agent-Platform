@@ -1,0 +1,15 @@
+F:\AI_Agent_Platform\experiments\langgraph_m4_mcp_integration\stdio_adapter.py:6: LangChainBetaWarning: `langchain.mcp` is in beta. It is actively being worked on, so the API may change.
+  from langchain.mcp import MCPAdapter
+langchain=1.5.2 fastmcp=4.2.5 client_mcp=2.3.0
+Server: Web Page Fetch MCP Server | protocol=2025-11-25
+Tool: fetch_web_page — Fetch readable text from a public HTTP/HTTPS HTML page without JavaScript.
+Input schema: {'properties': {'url': {'title': 'Url', 'type': 'string'}}, 'required': ['url'], 'title': 'fetch_web_pageArguments', 'type': 'object'}
+
+ToolMessage id=fetch-1 status=success
+Structured content: {'structured_content': {'title': 'Fixture 标题', 'url': 'https://example.com/', 'content': 'Fixture 正文', 'truncated': False, 'content_type': 'text/html'}}
+LLM answer: Fixture 正文
+fetch_failed code=NETWORK_ERROR
+
+ToolMessage id=fetch-1 status=error
+Tool error: Error executing tool fetch_web_page: NETWORK_ERROR: The network request failed.
+LLM answer: 抓取失败：Error executing tool fetch_web_page: NETWORK_ERROR: The network request failed.

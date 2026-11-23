@@ -1,0 +1,12 @@
+<stdin>:5: LangChainBetaWarning: `langchain.mcp` is in beta. It is actively being worked on, so the API may change.
+langchain==1.5.2
+langchain-core==1.8.1
+langgraph==1.2.22
+fastmcp==4.2.5
+mcp==2.3.0
+mcp-types==2.3.0
+MCPAdapter(target: 'MCPAdapterTarget') -> 'None'
+MCPAdapter.list_tools(self, *, cache_mode: 'CacheMode' = 'use') -> 'list[BaseTool]'
+Client(transport: 'ClientTransportT | FastMCP | SDKServer | AnyUrl | Path | MCPConfig | dict[str, Any] | str', name: 'str | None' = None, roots: 'RootsList | RootsHandler | None' = None, sampling_handler: 'SamplingHandler | None' = None, sampling_capabilities: 'mcp_types.SamplingCapability | None' = None, elicitation_handler: 'ElicitationHandler | None' = None, log_handler: 'LogHandler | None' = None, message_handler: 'MessageHandlerT | MessageHandler | None' = None, progress_handler: 'ProgressHandler | None' = None, timeout: 'datetime.timedelta | float | int | None' = None, auto_initialize: 'bool' = True, init_timeout: 'datetime.timedelta | float | int | None' = None, client_info: 'mcp_types.Implementation | None' = None, auth: "httpx2.Auth | Literal['oauth'] | str | None" = None, verify: 'ssl.SSLContext | bool | str | None' = None, mode: 'ConnectMode' = 'auto', prior_discover: 'mcp_types.DiscoverResult | None' = None, input_required_max_rounds: 'int' = 10, cache: 'CacheConfig | bool | None' = None, extensions: 'Sequence[ClientExtension] | None' = None, result_claims: 'Mapping[str, Sequence[ResultClaim[Any]]] | None' = None) -> 'None'
+StdioTransport(command: str, args: list[str], env: dict[str, str] | None = None, cwd: str | None = None, keep_alive: bool | None = None, log_file: pathlib.Path | typing.TextIO | None = None)
+Protocol result attribute: True
