@@ -1,0 +1,24 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m4_mcp_integration\.venv\Scripts\python.exe
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m4_integrated_agent
+configfile: pytest.ini
+plugins: anyio-4.16.0, langsmith-0.15.0, platformdirs-4.14.8
+collecting ... collected 9 items
+
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_three_tools_return_to_same_llm_turn_and_memory_is_saved PASSED [ 11%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_mcp_tool_error_is_a_failed_tool_message PASSED [ 22%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_mcp_connection_loss_propagates_without_fabricated_result PASSED [ 33%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_empty_rag_returns_successful_empty_collection PASSED [ 44%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_rag_retrieval_exception_reaches_caller_unchanged PASSED [ 55%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_budget_preserves_results_and_pairs_every_unexecuted_call PASSED [ 66%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_reused_graph_reads_only_current_users_memory_and_starts_fresh PASSED [ 77%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_memory_validation_rejects_fact_from_history_and_answer PASSED [ 88%]
+experiments\langgraph_m4_integrated_agent\tests\test_integrated_agent.py::test_memory_write_exception_reaches_graph_caller PASSED [100%]
+
+============================== warnings summary ===============================
+experiments\langgraph_m4_integrated_agent\stdio_adapter.py:6
+  F:\AI_Agent_Platform\experiments\langgraph_m4_integrated_agent\..\..\experiments\langgraph_m4_integrated_agent\stdio_adapter.py:6: LangChainBetaWarning: `langchain.mcp` is in beta. It is actively being worked on, so the API may change.
+    from langchain.mcp import MCPAdapter
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 9 passed, 1 warning in 5.85s =========================

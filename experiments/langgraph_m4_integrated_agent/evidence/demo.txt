@@ -1,0 +1,17 @@
+F:\AI_Agent_Platform\experiments\langgraph_m4_integrated_agent\stdio_adapter.py:6: LangChainBetaWarning: `langchain.mcp` is in beta. It is actively being worked on, so the API may change.
+  from langchain.mcp import MCPAdapter
+MCP protocol=2025-11-25, discovered=fetch_web_page
+Memory context: I study Python with notebooks.
+ToolMessage rag-1 (success): {"documents": [{"chunk_id": "backup-1", "source": "backup-policy.md", "content": "Backups are retained for 30 days."}]}
+ToolMessage web-1 (success): {
+  "title": "Fixture 标题",
+  "url": "https://example.com/",
+  "content": "Fixture 正文",
+  "truncated": false,
+  "content_type": "text/html"
+}
+ToolMessage weather-1 (success): sunny
+Answer: Backups are retained for 30 days. The fixture contains Fixture 正文. Beijing is sunny.
+llm_calls=2 stop_reason=answered memory_saved=True
+Saved memory, user 1: 'I study Python with notebooks.\nI always prefer short Python examples.'
+Saved memory, user 2: ''
