@@ -1,3 +1,5 @@
 # 本实验直接依赖，完整版本见 requirements.lock.txt。
 langgraph==1.2.22
+langgraph-checkpoint-postgres==3.2.1
+psycopg[binary]==3.3.9
 pytest==9.2.0

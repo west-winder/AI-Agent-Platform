@@ -6,7 +6,7 @@
 
 **v0.5 — Tool Calling & Agent Runtime Foundation**
 
-Stage 0～3 已 **COMPLETE / FROZEN**。Stage 4 学习进度为 **M4 COMPLETE**、**M5 NEXT**。
+Stage 0～3 已 **COMPLETE / FROZEN**。Stage 4 学习进度为 **M4 COMPLETE**、**M5 COMPLETE / FROZEN**、**M6 NEXT（Interrupt / Human-in-the-loop）**。
 
 ---
 
@@ -69,7 +69,8 @@ Module 8 — Evaluation / Observability / Metrics — COMPLETE / FROZEN
 
 Stage 4 — LangGraph + Agent Workflow
 M4 COMPLETE（学习实验）
-M5 NEXT
+M5 COMPLETE / FROZEN
+M6 NEXT（Interrupt / Human-in-the-loop）
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -1813,7 +1814,9 @@ Module 8 Evaluation / Observability / Metrics 已 **COMPLETE / FROZEN**：
 
 **M4 COMPLETE**。学习实验已完成 LangChain 基础、LangGraph LLM 节点和工具循环，以及 RAG、MCP 和 Memory 集成。M4-8 综合实验在同一张图中验证了工具调用、回传消息、调用预算和记忆读写。离线验收通过 9 项测试，其中 MCP 通过本地 stdio Fixture 执行，模型、RAG 和 Memory 使用模拟组件。 [M4-8 实验](experiments/langgraph_m4_integrated_agent/README.md) · [测试证据](experiments/langgraph_m4_integrated_agent/evidence/pytest.txt)
 
-**M5 NEXT**。后续学习项包括 Checkpoint / 持久化、Interrupt / Human-in-the-loop，以及更复杂的分支与多步骤工作流。
+**M5 COMPLETE / FROZEN**。使用 `InMemorySaver` 与 `PostgresSaver` 验证了 Checkpoint 与 Thread 状态管理、跨进程持久化、`StateSnapshot` 与历史查询、Super-step 与 Pending Writes、Resume 和同步 Durability。订单实验验证了事务提交后硬退出的恢复，以及数据库唯一约束与原子写入保障的业务幂等性。[M5 实验](experiments/langgraph_m5_persistence/README.md) · [全量测试证据](experiments/langgraph_m5_persistence/evidence/pytest_part_b.txt)
+
+**M6 NEXT**。接续学习项为 Interrupt / Human-in-the-loop。
 
 ---
 
@@ -1866,7 +1869,7 @@ COMPLETE / FROZEN
 
 Stage 0～3 及 Stage 3 Module 1～8 均已 COMPLETE / FROZEN。
 历史版本 v0.3 完成 PostgreSQL 与 LLM I/O Foundation，v0.4 完成 Unified RAG Foundation。
-Stage 4 学习进度为 M4 COMPLETE、M5 NEXT。
+Stage 4 学习进度为 M4 COMPLETE、M5 COMPLETE / FROZEN、M6 NEXT（Interrupt / Human-in-the-loop）。
 
 ---
 

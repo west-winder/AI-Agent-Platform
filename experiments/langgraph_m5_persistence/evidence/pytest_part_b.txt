@@ -1,0 +1,30 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.2.0, pluggy-1.7.0 -- F:\AI_Agent_Platform\experiments\langgraph_m5_persistence\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\AI_Agent_Platform\experiments\langgraph_m5_persistence
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.16.0, langsmith-0.14.17
+collecting ... collected 19 items
+
+tests/test_part_b.py::test_b1_fresh_saver_continues_and_keeps_threads_separate PASSED [  5%]
+tests/test_part_b.py::test_b1_checkpoint_survives_two_independent_processes PASSED [ 10%]
+tests/test_part_b.py::test_b2_in_memory_resumes_failed_branch_only PASSED [ 15%]
+tests/test_part_b.py::test_b2_postgres_resumes_failed_branch_in_a_new_process PASSED [ 21%]
+tests/test_part_b.py::test_b3_unprotected_resume_creates_a_duplicate_order PASSED [ 26%]
+tests/test_part_b.py::test_b3_idempotent_resume_returns_the_existing_order PASSED [ 31%]
+tests/test_part_b.py::test_b3_same_key_with_different_parameters_is_rejected PASSED [ 36%]
+tests/test_part_b.py::test_b3_worker_crash_after_commit_keeps_exactly_one_order PASSED [ 42%]
+tests/test_part_b.py::test_lab_rejects_unsafe_connection_targets[dbname=postgres host=127.0.0.1] PASSED [ 47%]
+tests/test_part_b.py::test_lab_rejects_unsafe_connection_targets[dbname=agent_platform_m5_lab host=example.com] PASSED [ 52%]
+tests/test_part_b.py::test_lab_rejects_unsafe_connection_targets[dbname=agent_platform_m5_lab host=localhost hostaddr=192.0.2.10] PASSED [ 57%]
+tests/test_persistence.py::test_a1_invocations_without_checkpointer_are_independent PASSED [ 63%]
+tests/test_persistence.py::test_a2_same_thread_continues_only_thread_scoped_state PASSED [ 68%]
+tests/test_persistence.py::test_a3_interleaved_threads_are_isolated PASSED [ 73%]
+tests/test_persistence.py::test_a4_initialize_run_clears_previous_values_before_parse PASSED [ 78%]
+tests/test_persistence.py::test_a5_get_state_returns_completed_snapshot PASSED [ 84%]
+tests/test_persistence.py::test_a6_history_is_newest_first_and_allows_checkpoint_lookup PASSED [ 89%]
+tests/test_persistence.py::test_a7_parallel_tasks_share_one_superstep_and_merge_before_report PASSED [ 94%]
+tests/test_persistence.py::test_a8_a_new_saver_starts_with_no_thread_state PASSED [100%]
+
+============================= 19 passed in 16.97s =============================

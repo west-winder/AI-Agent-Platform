@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable, Mapping
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -25,6 +26,9 @@ class PaperUpdate(TypedDict, total=False):
 
 class PaperState(PaperInput, PaperUpdate):
     """输入和节点更新组成的图状态。"""
+
+
+PaperNode = Callable[[PaperState], PaperUpdate]
 
 
 def initialize_run(_state: PaperState) -> PaperUpdate:
@@ -59,13 +63,24 @@ def generate_report(state: PaperState) -> PaperUpdate:
 
 def build_paper_graph(
     checkpointer: Checkpointer = None,
+    *,
+    node_overrides: Mapping[str, PaperNode] | None = None,
 ) -> CompiledStateGraph[PaperState, None, PaperInput, PaperState]:
     graph = StateGraph(PaperState, input_schema=PaperInput)
-    graph.add_node("InitializeRun", initialize_run)
-    graph.add_node("ParsePaper", parse_paper)
-    graph.add_node("AnalyzeContent", analyze_content)
-    graph.add_node("CheckReferences", check_references)
-    graph.add_node("GenerateReport", generate_report)
+    nodes = {
+        "InitializeRun": initialize_run,
+        "ParsePaper": parse_paper,
+        "AnalyzeContent": analyze_content,
+        "CheckReferences": check_references,
+        "GenerateReport": generate_report,
+    }
+    # Part B 在相同拓扑上注入故障与执行记录。
+    if node_overrides:
+        if unknown := node_overrides.keys() - nodes.keys():
+            raise ValueError(f"未知论文节点：{sorted(unknown)}")
+        nodes.update(node_overrides)
+    for name, node in nodes.items():
+        graph.add_node(name, node)
 
     graph.add_edge(START, "InitializeRun")
     graph.add_edge("InitializeRun", "ParsePaper")

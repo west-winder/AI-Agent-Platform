@@ -17,6 +17,7 @@ langchain-core==1.8.1
 langchain-protocol==0.0.21
 langgraph==1.2.22
 langgraph-checkpoint==4.3.2
+langgraph-checkpoint-postgres==3.2.1
 langgraph-prebuilt==1.1.2
 langgraph-sdk==0.4.14
 langsmith==0.14.17
@@ -24,6 +25,9 @@ orjson==3.13.0
 ormsgpack==1.13.1
 packaging==26.3
 pluggy==1.7.0
+psycopg==3.3.9
+psycopg-binary==3.3.9
+psycopg-pool==3.3.3
 pydantic==2.14.3
 pydantic_core==2.50.4
 Pygments==2.21.0
@@ -36,6 +40,7 @@ tenacity==9.2.1
 truststore==0.10.5
 typing-inspection==0.4.5
 typing_extensions==4.16.0
+tzdata==2026.6
 urllib3==2.8.0
 uuid_utils==0.19.0
 websockets==17.4
