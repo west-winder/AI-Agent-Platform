@@ -1,0 +1,82 @@
+无 Checkpointer
+第一次｜run_id=local-1｜completed_runs=1
+  report_history = ["local-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]
+第二次｜run_id=local-2｜completed_runs=1
+  report_history = ["local-2｜内容摘要｜月壤 含水｜引用 无"]
+
+同一个 InMemorySaver 与 Compiled Graph
+Thread A 第一次｜run_id=A-1｜completed_runs=1
+  report_history = ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]
+Thread B 第一次｜run_id=B-1｜completed_runs=1
+  report_history = ["B-1｜内容摘要｜珊瑚礁 温度 [ref:b1]｜引用 b1"]
+Thread A 第二次｜run_id=A-2｜completed_runs=2
+  report_history = ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1", "A-2｜内容摘要｜月壤 含水｜引用 无"]
+
+Thread A 最终 State（next=()）
+{
+  "run_id": "A-2",
+  "raw_paper_content": "月壤 含水",
+  "paper_content": "月壤 含水",
+  "analysis": "内容摘要｜月壤 含水",
+  "references": [],
+  "report": "A-2｜内容摘要｜月壤 含水｜引用 无",
+  "completed_runs": 2,
+  "report_history": [
+    "A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1",
+    "A-2｜内容摘要｜月壤 含水｜引用 无"
+  ]
+}
+
+Thread B 最终 State（next=()）
+{
+  "run_id": "B-1",
+  "raw_paper_content": "珊瑚礁 温度 [ref:b1]",
+  "paper_content": "珊瑚礁 温度 [ref:b1]",
+  "analysis": "内容摘要｜珊瑚礁 温度 [ref:b1]",
+  "references": [
+    "b1"
+  ],
+  "report": "B-1｜内容摘要｜珊瑚礁 温度 [ref:b1]｜引用 b1",
+  "completed_runs": 1,
+  "report_history": [
+    "B-1｜内容摘要｜珊瑚礁 温度 [ref:b1]｜引用 b1"
+  ]
+}
+
+Thread A 的 Checkpoint 历史（最新在前）
+step=10｜checkpoint_id=1f1e7eb6-2681-6acf-800a-069e7b21f444
+  next   = ()
+  values = {"run_id": "A-2", "raw_paper_content": "月壤 含水", "paper_content": "月壤 含水", "analysis": "内容摘要｜月壤 含水", "references": [], "report": "A-2｜内容摘要｜月壤 含水｜引用 无", "completed_runs": 2, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1", "A-2｜内容摘要｜月壤 含水｜引用 无"]}
+step=9｜checkpoint_id=1f1e7eb6-267f-6218-8009-a81d8122829d
+  next   = ('GenerateReport',)
+  values = {"run_id": "A-2", "raw_paper_content": "月壤 含水", "paper_content": "月壤 含水", "analysis": "内容摘要｜月壤 含水", "references": [], "report": "", "completed_runs": 1, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]}
+step=8｜checkpoint_id=1f1e7eb6-267c-6bcc-8008-c7a44c8b2014
+  next   = ('AnalyzeContent', 'CheckReferences')
+  values = {"run_id": "A-2", "raw_paper_content": "月壤 含水", "paper_content": "月壤 含水", "analysis": "", "references": [], "report": "", "completed_runs": 1, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]}
+step=7｜checkpoint_id=1f1e7eb6-267a-63f3-8007-4c7ab5e56a45
+  next   = ('ParsePaper',)
+  values = {"run_id": "A-2", "raw_paper_content": "月壤 含水", "paper_content": "", "analysis": "", "references": [], "report": "", "completed_runs": 1, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]}
+step=6｜checkpoint_id=1f1e7eb6-267a-63f2-8006-d325e65f1511
+  next   = ('InitializeRun',)
+  values = {"run_id": "A-2", "raw_paper_content": "月壤 含水", "paper_content": "石墨烯 导电 [ref:a1]", "analysis": "内容摘要｜石墨烯 导电 [ref:a1]", "references": ["a1"], "report": "A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1", "completed_runs": 1, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]}
+step=5｜checkpoint_id=1f1e7eb6-2677-6ce6-8005-961ee3f210cc
+  next   = ('__start__',)
+  values = {"run_id": "A-1", "raw_paper_content": "  石墨烯   导电 [ref:a1]  ", "paper_content": "石墨烯 导电 [ref:a1]", "analysis": "内容摘要｜石墨烯 导电 [ref:a1]", "references": ["a1"], "report": "A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1", "completed_runs": 1, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]}
+step=4｜checkpoint_id=1f1e7eb6-266b-6999-8004-81d79479c7a2
+  next   = ()
+  values = {"run_id": "A-1", "raw_paper_content": "  石墨烯   导电 [ref:a1]  ", "paper_content": "石墨烯 导电 [ref:a1]", "analysis": "内容摘要｜石墨烯 导电 [ref:a1]", "references": ["a1"], "report": "A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1", "completed_runs": 1, "report_history": ["A-1｜内容摘要｜石墨烯 导电 [ref:a1]｜引用 a1"]}
+step=3｜checkpoint_id=1f1e7eb6-2669-6294-8003-37015d7d3735
+  next   = ('GenerateReport',)
+  values = {"run_id": "A-1", "raw_paper_content": "  石墨烯   导电 [ref:a1]  ", "paper_content": "石墨烯 导电 [ref:a1]", "analysis": "内容摘要｜石墨烯 导电 [ref:a1]", "references": ["a1"], "report": ""}
+step=2｜checkpoint_id=1f1e7eb6-2664-64c7-8002-fc305662e02a
+  next   = ('AnalyzeContent', 'CheckReferences')
+  values = {"run_id": "A-1", "raw_paper_content": "  石墨烯   导电 [ref:a1]  ", "paper_content": "石墨烯 导电 [ref:a1]", "analysis": "", "references": [], "report": ""}
+step=1｜checkpoint_id=1f1e7eb6-2661-6d55-8001-eb75596c1614
+  next   = ('ParsePaper',)
+  values = {"run_id": "A-1", "raw_paper_content": "  石墨烯   导电 [ref:a1]  ", "paper_content": "", "analysis": "", "references": [], "report": ""}
+step=0｜checkpoint_id=1f1e7eb6-265f-6650-8000-d61b625f9ae4
+  next   = ('InitializeRun',)
+  values = {"run_id": "A-1", "raw_paper_content": "  石墨烯   导电 [ref:a1]  "}
+step=-1｜checkpoint_id=1f1e7eb6-265c-6f35-bfff-d0ad0bd62e64
+  next   = ('__start__',)
+  values = {}
