@@ -6,7 +6,7 @@
 
 **v0.5 — Tool Calling & Agent Runtime Foundation**
 
-Stage 0～3 已 **COMPLETE / FROZEN**；下一阶段为 **Stage 4 — LangGraph + Agent Workflow（NEXT）**。
+Stage 0～3 已 **COMPLETE / FROZEN**。Stage 4 学习进度为 **M4 COMPLETE**、**M5 NEXT**。
 
 ---
 
@@ -68,7 +68,8 @@ Module 7 — MCP Host Integration — COMPLETE / FROZEN
 Module 8 — Evaluation / Observability / Metrics — COMPLETE / FROZEN
 
 Stage 4 — LangGraph + Agent Workflow
-NEXT
+M4 COMPLETE（学习实验）
+M5 NEXT
 ```
 
 ### v0.1 — Basic Agent Chat Platform
@@ -1810,15 +1811,9 @@ Module 8 Evaluation / Observability / Metrics 已 **COMPLETE / FROZEN**：
 
 ### Stage 4 — LangGraph + Agent Workflow
 
-**NEXT**，尚未完成开发。计划学习和实现：
+**M4 COMPLETE**。学习实验已完成 LangChain 基础、LangGraph LLM 节点和工具循环，以及 RAG、MCP 和 Memory 集成。M4-8 综合实验在同一张图中验证了工具调用、回传消息、调用预算和记忆读写。离线验收通过 9 项测试，其中 MCP 通过本地 stdio Fixture 执行，模型、RAG 和 Memory 使用模拟组件。 [M4-8 实验](experiments/langgraph_m4_integrated_agent/README.md) · [测试证据](experiments/langgraph_m4_integrated_agent/evidence/pytest.txt)
 
-- LangGraph 基础
-- StateGraph / Node / Edge
-- Conditional Routing
-- Workflow 编排
-- Checkpoint / 持久化
-- Interrupt / Human-in-the-loop
-- 复杂分支与多步骤任务处理
+**M5 NEXT**。后续学习项包括 Checkpoint / 持久化、Interrupt / Human-in-the-loop，以及更复杂的分支与多步骤工作流。
 
 ---
 
@@ -1871,7 +1866,7 @@ COMPLETE / FROZEN
 
 Stage 0～3 及 Stage 3 Module 1～8 均已 COMPLETE / FROZEN。
 历史版本 v0.3 完成 PostgreSQL 与 LLM I/O Foundation，v0.4 完成 Unified RAG Foundation。
-下一阶段为 Stage 4 — LangGraph + Agent Workflow（NEXT），本轮不启动其开发。
+Stage 4 学习进度为 M4 COMPLETE、M5 NEXT。
 
 ---
 
